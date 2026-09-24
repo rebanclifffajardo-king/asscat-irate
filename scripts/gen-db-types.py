@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""
+Generate types/database.ts (Supabase-compatible `Database` type) by
+introspecting a PostgreSQL database that has the migrations applied.
+
+Usage:
+  DATABASE_URL=postgresql://postgres@127.0.0.1:54329/irate python3 scripts/gen-db-types.py
+
+Prefer `supabase gen types typescript` when Docker / a linked project is
+available; this script exists so types can be generated without Docker.
+"""
+import json
+import os
+import subprocess
+import sys
+
+DB = os.environ.get("DATABASE_URL", "postgresql://postgres@127.0.0.1:54329/irate")
+OUT = os.path.join(os.path.dirname(__file__), "..", "types", "database.ts")
+
+
+def q(sql):
+    res = subprocess.run(["psql", DB, "-tA", "-c", sql], capture_output=True, text=True, check=True)
+    out = res.stdout.strip()
+    return json.loads(out) if out else []
+
+
+enums = q("""
+select coalesce(json_agg(json_build_object('name', t.typname, 'values',
+  (select json_agg(e.enumlabel order by e.enumsortorder) from pg_enum e where e.enumtypid = t.oid))), '[]')
+from pg_type t join pg_namespace n on n.oid = t.typnamespace
+where n.nspname = 'public' and t.typtype = 'e'
+""")
+enum_names = {e["name"] for e in enums}
+
+columns = q("""
+select coalesce(json_agg(x order by x.rel, x.pos), '[]') from (
+  select c.relname as rel, c.relkind as kind, a.attname as col, a.attnum as pos,
+         format_type(a.atttypid, a.atttypmod) as type,
+         t.typname as udt, et.typname as elem,
+         not a.attnotnull as nullable,
+         a.atthasdef as has_default,
+         a.attidentity <> '' as is_identity,
+         a.attgenerated <> '' as is_generated
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+  join pg_type t on t.oid = a.atttypid
+  left join pg_type et on et.oid = t.typelem and t.typcategory = 'A'
+  where n.nspname = 'public' and c.relkind in ('r', 'v')
+) x
+""")
+
+rels = q("""
+select coalesce(json_agg(x order by x.rel, x.name), '[]') from (
+  select c.relname as rel, con.conname as name,
+         (select json_agg(a.attname order by k.ord) from unnest(con.conkey) with ordinality k(n, ord)
+            join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.n) as cols,
+         fc.relname as ref,
+         (select json_agg(a.attname order by k.ord) from unnest(con.confkey) with ordinality k(n, ord)
+            join pg_attribute a on a.attrelid = con.confrelid and a.attnum = k.n) as refcols,
+         exists (select 1 from pg_index i where i.indrelid = con.conrelid and i.indisunique
+                 and i.indkey::int2[] @> con.conkey and cardinality(con.conkey) = i.indnkeyatts) as one_to_one
+  from pg_constraint con
+  join pg_class c on c.oid = con.conrelid
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_class fc on fc.oid = con.confrelid
+  join pg_namespace fn on fn.oid = fc.relnamespace
+  where con.contype = 'f' and n.nspname = 'public' and fn.nspname = 'public'
+) x
+""")
+
+funcs = q("""
+select coalesce(json_agg(x order by x.name), '[]') from (
+  select p.proname as name,
+         pg_get_function_result(p.oid) as result,
+         p.proretset as retset,
+         rt.typname as ret_udt,
+         coalesce((select json_agg(json_build_object('name', p.proargnames[i], 'type', format_type(p.proargtypes[i - 1], null),
+                    'udt', (select typname from pg_type where oid = p.proargtypes[i - 1]),
+                    'optional', i > p.pronargs - p.pronargdefaults) order by i)
+                   from generate_series(1, p.pronargs) i), '[]') as args,
+         coalesce((select json_agg(json_build_object('name', p.proargnames[i], 'type', format_type(p.proallargtypes[i], null),
+                    'udt', (select typname from pg_type where oid = p.proallargtypes[i])) order by i)
+                   from generate_series(1, coalesce(array_length(p.proallargtypes, 1), 0)) i
+                   where p.proargmodes[i] = 't'), '[]') as table_cols
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  join pg_type rt on rt.oid = p.prorettype
+  where n.nspname = 'public' and rt.typname <> 'trigger'
+    and has_function_privilege('authenticated', p.oid, 'execute')
+) x
+""")
+
+SCALAR = {
+    "uuid": "string", "text": "string", "varchar": "string", "bpchar": "string", "citext": "string",
+    "inet": "string", "date": "string", "timestamptz": "string", "timestamp": "string", "time": "string",
+    "interval": "string", "int2": "number", "int4": "number", "int8": "number", "float4": "number",
+    "float8": "number", "numeric": "number", "bool": "boolean", "json": "Json", "jsonb": "Json", "void": "undefined",
+}
+
+
+def ts_type(udt, elem=None):
+    if elem:
+        return f"{ts_type(elem)}[]"
+    if udt.startswith("_"):
+        return f"{ts_type(udt[1:])}[]"
+    if udt in enum_names:
+        return f'Database["public"]["Enums"]["{udt}"]'
+    return SCALAR.get(udt, "unknown")
+
+
+def ident(name):
+    return name
+
+
+lines = []
+w = lines.append
+w("// AUTO-GENERATED by scripts/gen-db-types.py from supabase/migrations. Do not edit by hand.")
+w("export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];")
+w("")
+w("export type Database = {")
+w("  public: {")
+
+tables = {}
+for c in columns:
+    tables.setdefault((c["rel"], c["kind"]), []).append(c)
+
+rels_by_table = {}
+for r in rels:
+    rels_by_table.setdefault(r["rel"], []).append(r)
+
+
+def rel_block(indent, name):
+    items = rels_by_table.get(name, [])
+    if not items:
+        w(f"{indent}Relationships: [];")
+        return
+    w(f"{indent}Relationships: [")
+    for r in items:
+        w(f"{indent}  {{")
+        w(f'{indent}    foreignKeyName: "{r["name"]}";')
+        w(f"{indent}    columns: {json.dumps(r['cols'])};")
+        w(f"{indent}    isOneToOne: {'true' if r['one_to_one'] else 'false'};")
+        w(f'{indent}    referencedRelation: "{r["ref"]}";')
+        w(f"{indent}    referencedColumns: {json.dumps(r['refcols'])};")
+        w(f"{indent}  }},")
+    w(f"{indent}];")
+
+
+w("    Tables: {")
+for (name, kind), cols in sorted(tables.items()):
+    if kind != "r":
+        continue
+    w(f"      {name}: {{")
+    w("        Row: {")
+    for c in cols:
+        t = ts_type(c["udt"], c["elem"])
+        w(f"          {c['col']}: {t}{' | null' if c['nullable'] else ''};")
+    w("        };")
+    w("        Insert: {")
+    for c in cols:
+        t = ts_type(c["udt"], c["elem"])
+        if c["is_generated"] or c["is_identity"]:
+            w(f"          {c['col']}?: never;")
+            continue
+        opt = c["nullable"] or c["has_default"]
+        w(f"          {c['col']}{'?' if opt else ''}: {t}{' | null' if c['nullable'] else ''};")
+    w("        };")
+    w("        Update: {")
+    for c in cols:
+        t = ts_type(c["udt"], c["elem"])
+        if c["is_generated"] or c["is_identity"]:
+            w(f"          {c['col']}?: never;")
+            continue
+        w(f"          {c['col']}?: {t}{' | null' if c['nullable'] else ''};")
+    w("        };")
+    rel_block("        ", name)
+    w("      };")
+w("    };")
+
+w("    Views: {")
+for (name, kind), cols in sorted(tables.items()):
+    if kind != "v":
+        continue
+    w(f"      {name}: {{")
+    w("        Row: {")
+    for c in cols:
+        w(f"          {c['col']}: {ts_type(c['udt'], c['elem'])} | null;")
+    w("        };")
+    w("        Relationships: [];")
+    w("      };")
+w("    };")
+
+w("    Functions: {")
+for f in funcs:
+    if f["name"].startswith("_"):
+        continue
+    w(f"      {f['name']}: {{")
+    args = f["args"]
+    if not args:
+        w("        Args: never;")
+    else:
+        w("        Args: {")
+        for a in args:
+            w(f"          {a['name']}{'?' if a['optional'] else ''}: {ts_type(a['udt'])};")
+        w("        };")
+    if f["table_cols"]:
+        w("        Returns: {")
+        for tc in f["table_cols"]:
+            w(f"          {tc['name']}: {ts_type(tc['udt'])};")
+        w("        }[];")
+    else:
+        rt = ts_type(f["ret_udt"])
+        w(f"        Returns: {rt}{'[]' if f['retset'] else ''};")
+    w("      };")
+w("    };")
+
+w("    Enums: {")
+for e in enums:
+    w(f"      {e['name']}: {' | '.join(json.dumps(v) for v in e['values'])};")
+w("    };")
+w("    CompositeTypes: {")
+w("      [_ in never]: never;")
+w("    };")
+w("  };")
+w("};")
+w("")
+w('type PublicSchema = Database["public"];')
+w('export type Tables<T extends keyof PublicSchema["Tables"]> = PublicSchema["Tables"][T]["Row"];')
+w('export type TablesInsert<T extends keyof PublicSchema["Tables"]> = PublicSchema["Tables"][T]["Insert"];')
+w('export type TablesUpdate<T extends keyof PublicSchema["Tables"]> = PublicSchema["Tables"][T]["Update"];')
+w('export type Views<T extends keyof PublicSchema["Views"]> = PublicSchema["Views"][T]["Row"];')
+w('export type Enums<T extends keyof PublicSchema["Enums"]> = PublicSchema["Enums"][T];')
+w('export type Functions<T extends keyof PublicSchema["Functions"]> = PublicSchema["Functions"][T];')
+
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
+with open(OUT, "w") as fh:
+    fh.write("\n".join(lines) + "\n")
+print(f"wrote {os.path.normpath(OUT)} ({len(lines)} lines)", file=sys.stderr)
