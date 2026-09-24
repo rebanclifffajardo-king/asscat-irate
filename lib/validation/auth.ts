@@ -2,14 +2,14 @@ import { z } from "zod";
 import { checkbox, password } from "./common";
 
 export const loginSchema = z.object({
-  identifier: z.string().trim().min(1, "Enter your email or ID number.").max(254),
+  identifier: z.string().trim().min(1, "Enter your email, username or ID number.").max(254),
   password: z.string().min(1, "Enter your password.").max(200),
   remember: checkbox,
   next: z.string().max(500).optional(),
 });
 
 export const forgotPasswordSchema = z.object({
-  identifier: z.string().trim().min(1, "Enter your email or ID number.").max(254),
+  identifier: z.string().trim().min(1, "Enter your email, username or ID number.").max(254),
 });
 
 export const newPasswordSchema = z.object({

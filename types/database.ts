@@ -465,6 +465,7 @@ export type Database = {
           must_change_password: boolean
           role: Database["public"]["Enums"]["app_role"]
           updated_at: string
+          username: string | null
         }
         Insert: {
           avatar_path?: string | null
@@ -479,6 +480,7 @@ export type Database = {
           must_change_password?: boolean
           role: Database["public"]["Enums"]["app_role"]
           updated_at?: string
+          username?: string | null
         }
         Update: {
           avatar_path?: string | null
@@ -493,6 +495,7 @@ export type Database = {
           must_change_password?: boolean
           role?: Database["public"]["Enums"]["app_role"]
           updated_at?: string
+          username?: string | null
         }
         Relationships: []
       }

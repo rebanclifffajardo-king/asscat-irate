@@ -17,7 +17,7 @@ export function LoginForm({ next, notice }: { next?: string; notice?: string }) 
       {notice && <Alert tone="warning">{notice}</Alert>}
       {state?.error && <Alert tone="danger">{state.error}</Alert>}
       <input type="hidden" name="next" value={next ?? ""} />
-      <Field label="Email or ID Number" htmlFor="identifier" error={fe.identifier} required>
+      <Field label="Email, Username or ID Number" htmlFor="identifier" error={fe.identifier} required>
         <Input
           id="identifier"
           name="identifier"

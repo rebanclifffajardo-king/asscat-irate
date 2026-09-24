@@ -125,3 +125,13 @@ update subject_offerings set deleted_at = now() where id = current_setting('t.of
 select pg_temp.check('soft-deleted class hidden from overview', not exists (select 1 from offering_overview where id = current_setting('t.off')::uuid));
 select pg_temp.check('soft-deleted class keeps its evaluation records', exists (select 1 from evaluation_attempts where offering_id = current_setting('t.off')::uuid));
 reset role;
+
+-- ---------------------------------------------------------------- GoTrue createUser order
+-- Supabase Auth inserts the user, then sets app_metadata in a later UPDATE.
+insert into auth.users (id, email, raw_app_meta_data) values ('11111111-1111-4111-8111-111111111111', 'gotrue.order@test.local', '{"provider":"email"}');
+select pg_temp.check('no profile before role is set', not exists (select 1 from profiles where id = '11111111-1111-4111-8111-111111111111'));
+update auth.users set raw_app_meta_data = raw_app_meta_data || '{"role":"faculty","must_change_password":true}' where id = '11111111-1111-4111-8111-111111111111';
+select pg_temp.check('profile created when role arrives via UPDATE',
+  exists (select 1 from profiles where id = '11111111-1111-4111-8111-111111111111' and role = 'faculty' and must_change_password));
+update auth.users set raw_app_meta_data = raw_app_meta_data || '{"x":1}' where id = '11111111-1111-4111-8111-111111111111';
+select pg_temp.check('repeat metadata updates stay idempotent', (select count(*) from profiles where id = '11111111-1111-4111-8111-111111111111') = 1);
