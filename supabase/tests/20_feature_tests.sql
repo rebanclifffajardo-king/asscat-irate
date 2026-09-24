@@ -126,6 +126,134 @@ select pg_temp.check('soft-deleted class hidden from overview', not exists (sele
 select pg_temp.check('soft-deleted class keeps its evaluation records', exists (select 1 from evaluation_attempts where offering_id = current_setting('t.off')::uuid));
 reset role;
 
+-- ---------------------------------------------------------------- permanent class deletion (cascade)
+-- a failure at the last step rolls back every earlier delete
+create function pg_temp.fail_offering_delete() returns trigger language plpgsql as $$ begin raise exception 'forced failure'; end $$;
+create trigger t_fail_offering_delete before delete on public.subject_offerings for each row execute function pg_temp.fail_offering_delete();
+select set_config('t.rb', (select o.id::text from subject_offerings o where exists (select 1 from evaluation_attempts a where a.offering_id = o.id) order by o.id limit 1), false) \g /dev/null
+select set_config('t.rb_counts', ((select count(*) from evaluation_attempts where offering_id = current_setting('t.rb')::uuid)
+  + (select count(*) from subject_enrollments where offering_id = current_setting('t.rb')::uuid))::text, false) \g /dev/null
+select pg_temp.as_user('admin@asscat.edu.ph') \g /dev/null
+set role authenticated;
+do $$ begin
+  perform admin_delete_offerings(array[current_setting('t.rb')::uuid]);
+exception when others then null;
+end $$;
+reset role;
+drop trigger t_fail_offering_delete on public.subject_offerings;
+select pg_temp.check('failed class deletion rolls back completely',
+  exists (select 1 from subject_offerings where id = current_setting('t.rb')::uuid)
+  and ((select count(*) from evaluation_attempts where offering_id = current_setting('t.rb')::uuid)
+       + (select count(*) from subject_enrollments where offering_id = current_setting('t.rb')::uuid))::text = current_setting('t.rb_counts'));
+
+select pg_temp.as_user('admin@asscat.edu.ph') \g /dev/null
+set role authenticated;
+select set_config('t.del', (select o.id::text from subject_offerings o
+  where exists (select 1 from evaluation_attempts a join evaluation_comments c on c.attempt_id = a.id where a.offering_id = o.id and a.status = 'completed')
+  order by o.id limit 1), false) \g /dev/null
+select set_config('t.del_students', (select string_agg(student_id::text, ',') from subject_enrollments where offering_id = current_setting('t.del')::uuid), false) \g /dev/null
+select set_config('t.before', json_build_object(
+  'offerings', (select count(*) from subject_offerings), 'students', (select count(*) from students), 'faculty', (select count(*) from faculty),
+  'subjects', (select count(*) from subjects), 'questions', (select count(*) from questions), 'answers', (select count(*) from evaluation_answers),
+  'other_attempts', (select count(*) from evaluation_attempts where offering_id <> current_setting('t.del')::uuid),
+  'other_enrollments', (select count(*) from subject_enrollments where offering_id <> current_setting('t.del')::uuid))::text, false) \g /dev/null
+select set_config('t.res', admin_delete_offerings(array[current_setting('t.del')::uuid])::text, false) \g /dev/null
+select pg_temp.check('class with submitted evaluations can be deleted',
+  (current_setting('t.res')::jsonb->>'offerings')::int = 1 and (current_setting('t.res')::jsonb->>'completed')::int > 0
+  and (current_setting('t.res')::jsonb->>'answers')::int > 0 and (current_setting('t.res')::jsonb->>'comments')::int > 0);
+select pg_temp.check('class, enrollments and attempts are gone',
+  not exists (select 1 from subject_offerings where id = current_setting('t.del')::uuid)
+  and not exists (select 1 from subject_enrollments where offering_id = current_setting('t.del')::uuid)
+  and not exists (select 1 from evaluation_attempts where offering_id = current_setting('t.del')::uuid));
+select pg_temp.check('answers removed with the class (no orphans)',
+  (select count(*) from evaluation_answers) = (current_setting('t.before')::jsonb->>'answers')::int - (current_setting('t.res')::jsonb->>'answers')::int
+  and not exists (select 1 from evaluation_answers x where not exists (select 1 from evaluation_attempts a where a.id = x.attempt_id))
+  and not exists (select 1 from evaluation_comments c where not exists (select 1 from evaluation_attempts a where a.id = c.attempt_id)));
+select pg_temp.check('other classes, attempts and enrollments untouched',
+  (select count(*) from subject_offerings) = (current_setting('t.before')::jsonb->>'offerings')::int - 1
+  and (select count(*) from evaluation_attempts) = (current_setting('t.before')::jsonb->>'other_attempts')::int
+  and (select count(*) from subject_enrollments) = (current_setting('t.before')::jsonb->>'other_enrollments')::int);
+select pg_temp.check('students, faculty, subjects and questions untouched',
+  (select count(*) from students) = (current_setting('t.before')::jsonb->>'students')::int
+  and (select count(*) from faculty) = (current_setting('t.before')::jsonb->>'faculty')::int
+  and (select count(*) from subjects) = (current_setting('t.before')::jsonb->>'subjects')::int
+  and (select count(*) from questions) = (current_setting('t.before')::jsonb->>'questions')::int
+  and (select count(*) from students where id::text = any(string_to_array(current_setting('t.del_students'), ',')))
+      = cardinality(string_to_array(current_setting('t.del_students'), ',')));
+select pg_temp.check('bulk delete removes several classes at once',
+  (select (admin_delete_offerings((select array_agg(id) from (select id from subject_offerings where exists
+     (select 1 from evaluation_attempts a where a.offering_id = subject_offerings.id) order by id limit 2) t))->>'offerings')::int) = 2);
+do $$ begin
+  perform admin_delete_offerings(array[]::uuid[]);
+  raise notice 'FAIL  empty class list accepted';
+exception when invalid_parameter_value then raise notice 'PASS  empty class list rejected';
+end $$;
+do $$ begin
+  perform admin_delete_offerings(array[gen_random_uuid()]);
+  raise notice 'FAIL  unknown class accepted';
+exception when no_data_found then raise notice 'PASS  unknown class reported as not found';
+end $$;
+reset role;
+select pg_temp.as_user((select email from profiles where role = 'student' order by email limit 1)) \g /dev/null
+set role authenticated;
+do $$ begin
+  perform admin_delete_offerings(array[(select id from subject_offerings limit 1)]);
+  raise notice 'FAIL  student could delete a class';
+exception when insufficient_privilege then raise notice 'PASS  only admins can delete classes';
+end $$;
+reset role;
+select pg_temp.as_user((select email from profiles where role = 'faculty' order by email limit 1)) \g /dev/null
+set role authenticated;
+do $$ begin
+  perform admin_delete_offerings(array[(select id from subject_offerings limit 1)]);
+  raise notice 'FAIL  faculty could delete a class';
+exception when insufficient_privilege then raise notice 'PASS  faculty cannot delete classes';
+end $$;
+reset role;
+
+-- ---------------------------------------------------------------- permanent student deletion (cascade)
+select pg_temp.as_user('admin@asscat.edu.ph') \g /dev/null
+set role authenticated;
+select set_config('t.stu', (select a.student_id::text from evaluation_attempts a join evaluation_comments c on c.attempt_id = a.id
+  where a.status = 'completed' order by a.student_id limit 1), false) \g /dev/null
+select set_config('t.sb', json_build_object(
+  'students', (select count(*) from students), 'faculty', (select count(*) from faculty), 'offerings', (select count(*) from subject_offerings),
+  'other_attempts', (select count(*) from evaluation_attempts where student_id <> current_setting('t.stu')::uuid),
+  'other_enrollments', (select count(*) from subject_enrollments where student_id <> current_setting('t.stu')::uuid),
+  'profile', (select profile_id from students where id = current_setting('t.stu')::uuid))::text, false) \g /dev/null
+select set_config('t.sres', admin_delete_students(array[current_setting('t.stu')::uuid])::text, false) \g /dev/null
+select pg_temp.check('student with submitted evaluations can be deleted',
+  jsonb_array_length(current_setting('t.sres')::jsonb->'students') = 1 and (current_setting('t.sres')::jsonb->>'completed')::int > 0
+  and (current_setting('t.sres')::jsonb->'students'->0->>'profile_id') = current_setting('t.sb')::jsonb->>'profile');
+select pg_temp.check('student, enrollments and attempts are gone (no orphans)',
+  not exists (select 1 from students where id = current_setting('t.stu')::uuid)
+  and not exists (select 1 from subject_enrollments where student_id = current_setting('t.stu')::uuid)
+  and not exists (select 1 from evaluation_attempts where student_id = current_setting('t.stu')::uuid)
+  and not exists (select 1 from evaluation_answers x where not exists (select 1 from evaluation_attempts a where a.id = x.attempt_id))
+  and not exists (select 1 from evaluation_comments c where not exists (select 1 from evaluation_attempts a where a.id = c.attempt_id)));
+select pg_temp.check('other students, classes and faculty untouched',
+  (select count(*) from students) = (current_setting('t.sb')::jsonb->>'students')::int - 1
+  and (select count(*) from faculty) = (current_setting('t.sb')::jsonb->>'faculty')::int
+  and (select count(*) from subject_offerings) = (current_setting('t.sb')::jsonb->>'offerings')::int
+  and (select count(*) from evaluation_attempts) = (current_setting('t.sb')::jsonb->>'other_attempts')::int
+  and (select count(*) from subject_enrollments) = (current_setting('t.sb')::jsonb->>'other_enrollments')::int);
+select pg_temp.check('bulk student delete removes several at once',
+  jsonb_array_length((admin_delete_students((select array_agg(student_id) from (select distinct student_id from subject_enrollments order by 1 limit 3) t)))->'students') = 3);
+do $$ begin
+  perform admin_delete_students(array[gen_random_uuid()]);
+  raise notice 'FAIL  unknown student accepted';
+exception when no_data_found then raise notice 'PASS  unknown student reported as not found';
+end $$;
+reset role;
+select pg_temp.as_user((select email from profiles where role = 'faculty' order by email limit 1)) \g /dev/null
+set role authenticated;
+do $$ begin
+  perform admin_delete_students(array[(select id from students limit 1)]);
+  raise notice 'FAIL  faculty could delete a student';
+exception when insufficient_privilege then raise notice 'PASS  only admins can delete students';
+end $$;
+reset role;
+
 -- ---------------------------------------------------------------- GoTrue createUser order
 -- Supabase Auth inserts the user, then sets app_metadata in a later UPDATE.
 insert into auth.users (id, email, raw_app_meta_data) values ('11111111-1111-4111-8111-111111111111', 'gotrue.order@test.local', '{"provider":"email"}');

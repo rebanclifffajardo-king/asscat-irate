@@ -4,10 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient, type ServerSupabase } from "@/lib/supabase/server";
 import { assertRole } from "@/lib/auth/session";
-import { dbError, formToObject, parseInput, runAction, UserFacingError, type ActionResult } from "@/lib/actions";
+import { bulkIds, bulkMessage, dbError, formToObject, parseInput, runAction, UserFacingError, type ActionResult, type BulkResult } from "@/lib/actions";
 import { logActivity } from "@/lib/activity";
 import { facultySchema } from "@/lib/validation/people";
-import { createAccount, deleteAccount, resetAccountPassword, setAccountActive, updateAccountEmail } from "@/lib/auth/accounts";
+import { createFacultyRecord } from "@/lib/people/create";
+import { deleteAccount, resetAccountPassword, setAccountActive, updateAccountEmail } from "@/lib/auth/accounts";
 import { validateImageFile } from "@/lib/storage";
 import { formatPersonName } from "@/lib/format";
 
@@ -48,18 +49,7 @@ export async function createFaculty(formData: FormData): Promise<ActionResult<{ 
     if (byId) throw new UserFacingError(UNIQUE_MSG, { faculty_number: ["Faculty ID is already in use."] });
     if (byEmail) throw new UserFacingError(UNIQUE_MSG, { email: ["Email is already in use."] });
 
-    // Department always follows the program (also enforced by a DB trigger + composite FK).
-    const { data: program } = await supabase.from("programs").select("department_id, is_active").eq("id", v.program_id).maybeSingle();
-    if (!program?.is_active) throw new UserFacingError("Select a valid, active program.", { program_id: ["Select a valid program."] });
-
-    const account = await createAccount({ email: v.email, role: "faculty", firstName: v.first_name, lastName: v.last_name });
-    const { data, error } = await supabase.from("faculty")
-      .insert({ ...v, department_id: program.department_id, profile_id: account.userId, created_by: user.id })
-      .select("id").single();
-    if (error) {
-      await deleteAccount(account.userId);
-      throw dbError(error, { unique: UNIQUE_MSG, foreignKey: "Select a valid program." });
-    }
+    const data = await createFacultyRecord(supabase, user.id, v);
     if (photo) {
       try {
         const path = await uploadPhoto(supabase, data.id, photo);
@@ -73,7 +63,7 @@ export async function createFaculty(formData: FormData): Promise<ActionResult<{ 
       description: `${v.faculty_number} – ${formatPersonName(v.first_name, v.middle_name, v.last_name)}`, entityType: "faculty", entityId: data.id,
     });
     revalidatePath("/admin/faculty");
-    return { tempPassword: account.tempPassword, email: v.email };
+    return { tempPassword: data.tempPassword, email: v.email };
   }, "Faculty account created.");
 }
 
@@ -140,6 +130,65 @@ export async function deleteFaculty(id: string): Promise<ActionResult<null>> {
     revalidatePath("/admin/faculty");
     return null;
   }, "Faculty deleted.");
+}
+
+/**
+ * Bulk version of deleteFaculty. Same rule: faculty with assigned classes
+ * (including archived ones) are skipped (deactivate them instead); nothing is
+ * cascaded. Photos and login accounts of deleted faculty are removed afterwards.
+ */
+export async function deleteFaculties(ids: string[]): Promise<ActionResult<BulkResult>> {
+  const res = await runAction(async () => {
+    const user = await assertRole("admin");
+    const fids = [...new Set(parseInput(bulkIds, ids))];
+    const supabase = await createClient();
+    const [{ data: rows, error }, { data: classes, error: clsError }] = await Promise.all([
+      supabase.from("faculty").select("id, faculty_number, first_name, last_name").in("id", fids),
+      supabase.from("subject_offerings").select("faculty_id").in("faculty_id", fids),
+    ]);
+    if (error || clsError) throw dbError((error ?? clsError)!);
+    const found = new Map((rows ?? []).map((r) => [r.id, r]));
+    const hasClasses = new Set((classes ?? []).map((c) => c.faculty_id));
+    const label = (id: string) => { const r = found.get(id); return r ? `${r.last_name}, ${r.first_name} (${r.faculty_number})` : "Unknown faculty"; };
+
+    const skipped: BulkResult["skipped"] = [];
+    const candidates: string[] = [];
+    for (const id of fids) {
+      if (!found.has(id)) skipped.push({ id, label: label(id), reason: "not found" });
+      else if (hasClasses.has(id)) skipped.push({ id, label: label(id), reason: "has assigned classes" });
+      else candidates.push(id);
+    }
+
+    // One statement for all; if a class was assigned since the check (FK error), retry row by row.
+    type Deleted = { id: string; faculty_number: string; profile_id: string | null; photo_path: string | null };
+    let deleted: Deleted[] = [];
+    if (candidates.length) {
+      const del = await supabase.from("faculty").delete().in("id", candidates).select("id, faculty_number, profile_id, photo_path");
+      if (!del.error) deleted = del.data ?? [];
+      else if (del.error.code === "23503") {
+        for (const id of candidates) {
+          const one = await supabase.from("faculty").delete().eq("id", id).select("id, faculty_number, profile_id, photo_path").maybeSingle();
+          if (one.error?.code === "23503") skipped.push({ id, label: label(id), reason: "has assigned classes" });
+          else if (one.error) throw dbError(one.error);
+          else if (one.data) deleted.push(one.data);
+        }
+      } else throw dbError(del.error);
+    }
+    const photos = deleted.map((d) => d.photo_path).filter((p): p is string => !!p);
+    if (photos.length) await supabase.storage.from(BUCKET).remove(photos);
+    for (const d of deleted) if (d.profile_id) await deleteAccount(d.profile_id);
+
+    if (deleted.length) {
+      await logActivity({
+        user, module: "Faculty", action: "Deleted faculty",
+        description: `${deleted.length} deleted, ${skipped.length} skipped: ${deleted.map((d) => d.faculty_number).join(", ")}`,
+        metadata: { deleted: deleted.map((d) => d.id), skipped: skipped.map((x) => ({ id: x.id, reason: x.reason })) },
+      });
+      revalidatePath("/admin/faculty");
+    }
+    return { done: deleted.length, skipped };
+  });
+  return res.ok ? { ...res, message: bulkMessage(res.data.done, "deleted", res.data.skipped) } : res;
 }
 
 export async function resetFacultyPassword(id: string): Promise<ActionResult<{ tempPassword: string }>> {

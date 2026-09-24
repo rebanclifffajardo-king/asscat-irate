@@ -5,7 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { PasswordForm } from "@/components/auth/password-form";
 import { getSessionUser } from "@/lib/auth/session";
 import { ROLE_HOME } from "@/lib/auth/roles";
-import { signOut } from "@/app/actions/auth";
+import { LogoutButton } from "@/components/auth/logout-button";
 import { changePassword } from "../actions";
 
 export const metadata: Metadata = { title: "Change password" };
@@ -23,9 +23,9 @@ export default async function ChangePasswordPage() {
           For your security, you must replace the temporary password provided by the administrator before continuing.
         </Alert>
         <PasswordForm action={changePassword} mode="forced" submitLabel="Update password and continue" />
-        <form action={signOut} className="mt-4 text-center">
-          <button type="submit" className="text-sm font-semibold text-gray-500 hover:text-gray-700 hover:underline">Log out</button>
-        </form>
+        <div className="mt-4 text-center">
+          <LogoutButton className="text-sm font-semibold text-gray-500 hover:text-gray-700 hover:underline">Log out</LogoutButton>
+        </div>
       </CardBody>
     </Card>
   );

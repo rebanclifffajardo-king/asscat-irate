@@ -21,8 +21,8 @@ export const yearLevelSchema = z.object({
 });
 
 export const subjectSchema = z.object({
-  code: code("Subject code", 30),
-  title: requiredText("Subject title", 200),
+  code: code("Course number", 30),
+  title: requiredText("Descriptive title", 200),
   description: optionalText(1000),
   units: z.union([z.literal(""), z.coerce.number().min(0).max(12)]).optional()
     .transform((v) => (v === "" || v === undefined ? null : v)),

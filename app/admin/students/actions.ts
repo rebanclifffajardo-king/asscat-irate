@@ -4,10 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { assertRole } from "@/lib/auth/session";
-import { dbError, parseInput, runAction, UserFacingError, type ActionResult } from "@/lib/actions";
+import { bulkIds, bulkMessage, dbError, parseInput, runAction, UserFacingError, type ActionResult, type BulkResult } from "@/lib/actions";
 import { logActivity } from "@/lib/activity";
 import { studentSchema } from "@/lib/validation/people";
-import { createAccount, deleteAccount, resetAccountPassword, setAccountActive, updateAccountEmail } from "@/lib/auth/accounts";
+import { createStudentRecord } from "@/lib/people/create";
+import { deleteAccount, resetAccountPassword, setAccountActive, updateAccountEmail } from "@/lib/auth/accounts";
 import { formatPersonName } from "@/lib/format";
 
 const UNIQUE_MSG = "A student with this Student ID or email already exists.";
@@ -25,18 +26,13 @@ export async function createStudent(raw: unknown): Promise<ActionResult<{ tempPa
     if (byId) throw new UserFacingError(UNIQUE_MSG, { student_number: ["Student ID is already in use."] });
     if (byEmail) throw new UserFacingError(UNIQUE_MSG, { email: ["Email is already in use."] });
 
-    const account = await createAccount({ email: v.email, role: "student", firstName: v.first_name, lastName: v.last_name });
-    const { data, error } = await supabase.from("students").insert({ ...v, profile_id: account.userId, created_by: user.id }).select("id").single();
-    if (error) {
-      await deleteAccount(account.userId); // compensate: never leave an orphan account
-      throw dbError(error, { unique: UNIQUE_MSG, foreignKey: "Select a valid program and year level." });
-    }
+    const created = await createStudentRecord(supabase, user.id, v);
     await logActivity({
       user, module: "Students", action: "Created student account",
-      description: `${v.student_number} – ${formatPersonName(v.first_name, v.middle_name, v.last_name)}`, entityType: "students", entityId: data.id,
+      description: `${v.student_number} – ${formatPersonName(v.first_name, v.middle_name, v.last_name)}`, entityType: "students", entityId: created.id,
     });
     revalidatePath("/admin/students");
-    return { tempPassword: account.tempPassword, email: v.email };
+    return { tempPassword: created.tempPassword, email: v.email };
   }, "Student account created.");
 }
 
@@ -79,19 +75,72 @@ export async function setStudentActive(input: { id: string; active: boolean }): 
   }, input.active ? "Student activated." : "Student deactivated. The account can no longer sign in.");
 }
 
+export type DeletionImpact = { records: number; enrollments: number; completed: number; inProgress: number };
+
+/** What deleting these students would also remove (for the confirmation dialog). */
+export async function getStudentDeletionImpact(ids: string[]): Promise<ActionResult<DeletionImpact>> {
+  return runAction(async () => {
+    await assertRole("admin");
+    const sids = [...new Set(parseInput(bulkIds, ids))];
+    const supabase = await createClient();
+    const [{ count: enrollments, error: e1 }, { data: attempts, error: e2 }] = await Promise.all([
+      supabase.from("subject_enrollments").select("id", { count: "exact", head: true }).in("student_id", sids),
+      supabase.from("evaluation_attempts").select("status").in("student_id", sids),
+    ]);
+    if (e1 || e2) throw dbError((e1 ?? e2)!);
+    return {
+      records: sids.length,
+      enrollments: enrollments ?? 0,
+      completed: (attempts ?? []).filter((a) => a.status === "completed").length,
+      inProgress: (attempts ?? []).filter((a) => a.status === "in_progress").length,
+    };
+  });
+}
+
+type StudentDeleteSummary = { students: { id: string; student_number: string; profile_id: string | null }[]; enrollments: number; attempts: number; completed: number };
+
+/**
+ * Permanent delete of students together with their class enrollments and
+ * evaluations (answers, comments) in one database transaction — see
+ * admin_delete_students. Classes, faculty and other students are never
+ * touched. Login accounts are removed afterwards.
+ */
+async function purgeStudents(ids: string[]): Promise<BulkResult> {
+  const user = await assertRole("admin");
+  const supabase = await createClient();
+  const { data: rows, error } = await supabase.from("students").select("id").in("id", ids);
+  if (error) throw dbError(error);
+  const known = new Set((rows ?? []).map((r) => r.id));
+  const skipped: BulkResult["skipped"] = ids.filter((id) => !known.has(id)).map((id) => ({ id, label: "Unknown student", reason: "not found" }));
+  if (!known.size) throw new UserFacingError(ids.length === 1 ? "Student not found. They may have been deleted already." : "None of the selected students were found.");
+
+  const { data, error: rpcError } = await supabase.rpc("admin_delete_students", { p_student_ids: [...known] });
+  if (rpcError) throw dbError(rpcError, { foreignKey: "The student could not be deleted because other records still depend on them. Nothing was deleted." });
+  const r = data as unknown as StudentDeleteSummary;
+  for (const s of r.students) if (s.profile_id) await deleteAccount(s.profile_id);
+
+  await logActivity({
+    user, module: "Students", action: r.students.length === 1 ? "Deleted student" : "Deleted students",
+    description: `${r.students.map((s) => s.student_number).join(", ")} — removed ${r.enrollments} enrollment(s) and ${r.attempts} evaluation(s) (${r.completed} submitted).`,
+    entityType: "students", entityId: r.students.length === 1 ? r.students[0].id : undefined,
+    metadata: { deleted: r.students.map((s) => s.id), enrollments: r.enrollments, attempts: r.attempts, completed: r.completed },
+  });
+  revalidatePath("/admin/students");
+  return { done: r.students.length, skipped };
+}
+
+/** Permanently deletes a student, including enrollments and evaluations (after the UI's cascade warning). */
 export async function deleteStudent(id: string): Promise<ActionResult<null>> {
   return runAction(async () => {
-    const user = await assertRole("admin");
-    const sid = parseInput(z.uuid(), id);
-    const supabase = await createClient();
-    const { data, error } = await supabase.from("students").delete().eq("id", sid).select("student_number, profile_id").maybeSingle();
-    if (error) throw dbError(error, { foreignKey: "This student has enrollment or evaluation records and cannot be deleted. Deactivate the student instead." });
-    if (!data) throw new UserFacingError("Student not found.");
-    if (data.profile_id) await deleteAccount(data.profile_id);
-    await logActivity({ user, module: "Students", action: "Deleted student", description: data.student_number, entityType: "students", entityId: sid });
-    revalidatePath("/admin/students");
+    await purgeStudents([parseInput(z.uuid(), id)]);
     return null;
-  }, "Student deleted.");
+  }, "Student and all connected records were permanently deleted.");
+}
+
+/** Bulk version of deleteStudent. */
+export async function deleteStudents(ids: string[]): Promise<ActionResult<BulkResult>> {
+  const res = await runAction(async () => purgeStudents([...new Set(parseInput(bulkIds, ids))]));
+  return res.ok ? { ...res, message: bulkMessage(res.data.done, "deleted", res.data.skipped) } : res;
 }
 
 export async function resetStudentPassword(id: string): Promise<ActionResult<{ tempPassword: string }>> {

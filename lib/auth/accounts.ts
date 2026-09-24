@@ -23,6 +23,12 @@ export function generateTempPassword(length = 12): string {
     const j = randomInt(i + 1);
     [chars[i], chars[j]] = [chars[j], chars[i]];
   }
+  // Never start with a symbol: a leading "@" is read as a formula when the
+  // password is opened from a CSV export in a spreadsheet.
+  if (SYMBOLS.includes(chars[0])) {
+    const k = chars.findIndex((c) => !SYMBOLS.includes(c));
+    [chars[0], chars[k]] = [chars[k], chars[0]];
+  }
   return chars.join("");
 }
 

@@ -5,7 +5,7 @@ import type { PreviewRow } from "./course";
 
 export const EVALUATION_COLUMNS: Record<string, string[]> = {
   student_id: ["studentid", "studentnumber", "studentno", "idnumber"],
-  subject_code: ["subjectcode", "code", "coursecode"],
+  subject_code: ["coursenumber", "courseno", "subjectcode", "code", "coursecode"],
   faculty_id: ["facultyid", "teacherid", "instructorid", "facultynumber", "facultyno"],
   school_year: ["schoolyear", "sy", "academicyear"],
   semester: ["semester", "sem", "term"],
@@ -88,7 +88,7 @@ export async function validateEvaluationFile(file: File, supabase: ServerSupabas
 
     if (!stu) errors.push("Student ID is required.");
     else if (!students.has(stu)) errors.push(`Student ID ${stu} does not exist.`);
-    if (!code) errors.push("Subject Code is required.");
+    if (!code) errors.push("Course Number is required.");
     if (!fac) errors.push("Faculty ID is required.");
     if (!year) errors.push(`Invalid School Year "${v.school_year}".`);
     if (!sem) errors.push(`Invalid Semester "${v.semester}".`);

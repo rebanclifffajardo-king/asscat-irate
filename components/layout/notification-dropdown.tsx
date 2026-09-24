@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Bell, CheckCheck, CheckCircle2, Info, AlertTriangle, XCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { formatRelative } from "@/lib/format";
 import {
   getNotifications, getUnreadCount, markAllNotificationsRead, markNotificationRead, type NotificationItem,
@@ -16,6 +17,7 @@ export function NotificationDropdown({ initialUnread }: { initialUnread: number 
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(initialUnread);
   const [items, setItems] = useState<NotificationItem[] | null>(null);
+  const [confirmAll, setConfirmAll] = useState(false);
   const [pending, startTransition] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
 
@@ -79,11 +81,7 @@ export function NotificationDropdown({ initialUnread }: { initialUnread: number 
             <button
               type="button"
               disabled={unread === 0}
-              onClick={() => {
-                setItems((prev) => prev?.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })) ?? null);
-                setUnread(0);
-                void markAllNotificationsRead();
-              }}
+              onClick={() => { setOpen(false); setConfirmAll(true); }}
               className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-40"
             >
               <CheckCheck className="h-3.5 w-3.5" /> Mark all as read
@@ -122,6 +120,20 @@ export function NotificationDropdown({ initialUnread }: { initialUnread: number 
           </ul>
         </div>
       )}
+      <ConfirmationDialog
+        open={confirmAll}
+        onClose={() => setConfirmAll(false)}
+        tone="primary"
+        title="Mark all as read?"
+        message={<>Mark all <strong>{unread}</strong> unread notification(s) as read?</>}
+        confirmLabel="Mark all as read"
+        onConfirm={async () => {
+          setItems((prev) => prev?.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })) ?? null);
+          setUnread(0);
+          setConfirmAll(false);
+          await markAllNotificationsRead();
+        }}
+      />
     </div>
   );
 }

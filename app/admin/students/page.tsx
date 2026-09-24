@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { FileUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPrograms, getYearLevels } from "@/lib/data/lookups";
 import { listQuery, likePattern, readParams } from "@/lib/url";
@@ -10,6 +12,8 @@ import { SearchInput } from "@/components/ui/search-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BulkDeleteStudentsButton } from "@/components/admin/bulk-actions";
+import { buttonClasses } from "@/components/ui/button";
 import { AddStudentButton, StudentLink, StudentRowActions } from "@/components/admin/people/student-form";
 
 export const metadata: Metadata = { title: "Students" };
@@ -59,7 +63,7 @@ export default async function StudentsPage({ searchParams }: PageProps<"/admin/s
       <PageHeader
         title="Students"
         breadcrumbs={[{ label: "Home", href: "/admin/dashboard" }, { label: "Students" }]}
-        actions={<AddStudentButton programs={programOpts} yearLevels={yearLevels} />}
+        actions={<div className="flex flex-wrap gap-2"><Link href="/admin/students/import" className={buttonClasses("secondary")}><FileUp className="h-4 w-4" /> Import CSV</Link><AddStudentButton programs={programOpts} yearLevels={yearLevels} /></div>}
       />
       <Card outline="brand">
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end">
@@ -69,7 +73,9 @@ export default async function StudentsPage({ searchParams }: PageProps<"/admin/s
           <FilterSelect param="status" label="Status" options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]} className="lg:w-36" />
         </div>
         <DataTable columns={columns} rows={data ?? []} rowKey={(r) => r.id!} basePath="/admin/students" params={params} sort={lq.sort} dir={lq.dir}
-          caption="Students" empty={<EmptyState title="No students found" description="Adjust the filters or add a student." />} />
+          caption="Students"
+          selection={{ rowLabel: (r) => `${r.last_name}, ${r.first_name} (${r.student_number})`, actions: <BulkDeleteStudentsButton /> }}
+          empty={<EmptyState title="No students found" description="Adjust the filters or add a student." />} />
         <Pagination page={lq.page} pageSize={lq.pageSize} total={count ?? 0} basePath="/admin/students" params={params} />
       </Card>
     </>

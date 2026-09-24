@@ -21,8 +21,8 @@ export default async function SubjectsPage({ searchParams }: PageProps<"/admin/s
   const { data, count } = await q.order(lq.sort, { ascending: lq.dir === "asc" }).range(lq.from, lq.to);
   type Row = NonNullable<typeof data>[number];
   const columns: Column<Row>[] = [
-    { key: "code", header: "Subject Code", sortKey: "code", className: "whitespace-nowrap", cell: (r) => <span className="font-semibold text-gray-900">{r.code}</span> },
-    { key: "title", header: "Subject Title", sortKey: "title", primary: true, cell: (r) => r.title },
+    { key: "code", header: "Course Number", sortKey: "code", className: "whitespace-nowrap", cell: (r) => <span className="font-semibold text-gray-900">{r.code}</span> },
+    { key: "title", header: "Descriptive Title", sortKey: "title", primary: true, cell: (r) => r.title },
     { key: "units", header: "Units", sortKey: "units", className: "text-center", cell: (r) => r.units ?? "—" },
     { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.is_active ? "active" : "inactive"} /> },
     { key: "actions", header: "Action", isAction: true, className: "w-16 text-right", cell: (r) => <SubjectRowActions subject={r} /> },

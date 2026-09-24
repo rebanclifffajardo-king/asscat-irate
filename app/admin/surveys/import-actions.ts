@@ -5,31 +5,14 @@ import { createClient } from "@/lib/supabase/server";
 import { assertRole } from "@/lib/auth/session";
 import { dbError, runAction, UserFacingError, type ActionResult } from "@/lib/actions";
 import { logActivity } from "@/lib/activity";
-import { validateCourseFile, type PreviewRow } from "@/lib/import/course";
+import { validateCourseFile } from "@/lib/import/course";
+import { importFile as fileFrom, previewRows } from "@/lib/import/records";
 import { validateEvaluationFile } from "@/lib/import/evaluation";
 import { getSettings } from "@/lib/data/lookups";
+import type { ImportPreview } from "@/lib/import/types";
 import type { Json } from "@/types/database";
 
-export type ImportPreview = {
-  fileName: string;
-  rows: PreviewRow[];
-  summary: Record<string, number>;
-};
-
-const PREVIEW_LIMIT = 500;
-
-function fileFrom(formData: FormData): File {
-  const f = formData.get("file");
-  if (!(f instanceof File)) throw new UserFacingError("Please choose a file to import.");
-  return f;
-}
-
-/** Only rows with problems + the first N rows are sent back for preview. */
-function previewRows(rows: PreviewRow[]): PreviewRow[] {
-  const flagged = rows.filter((r) => r.errors.length || r.warnings.length);
-  const clean = rows.filter((r) => !r.errors.length && !r.warnings.length).slice(0, Math.max(0, PREVIEW_LIMIT - flagged.length));
-  return [...flagged.slice(0, PREVIEW_LIMIT), ...clean].sort((a, b) => a.row - b.row);
-}
+export type { ImportPreview };
 
 async function notify(userId: string, title: string, message: string, type: "success" | "warning" | "error") {
   const supabase = await createClient();

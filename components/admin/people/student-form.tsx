@@ -13,6 +13,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useServerAction } from "@/lib/hooks/use-server-action";
 import { createStudent, deleteStudent, resetStudentPassword, setStudentActive, updateStudent } from "@/app/admin/students/actions";
 import { TempPasswordDialog } from "./temp-password-dialog";
+import { StudentDeleteDialog } from "./student-delete-dialog";
 
 type Option = { id: string; code?: string; name: string; is_active: boolean };
 export type StudentItem = {
@@ -122,9 +123,10 @@ export function StudentRowActions({ student, programs, yearLevels }: { student: 
           const res = await resetStudentPassword(student.id);
           if (res.ok) { setConfirm(null); setTemp(res.data.tempPassword); } else toast.error(res.error);
         }} />
-      <ConfirmationDialog open={confirm === "delete"} onClose={() => setConfirm(null)} title="Delete student?"
-        message={<>Permanently delete <strong>{student.full_name}</strong> and their login account? Students with enrollment or evaluation records cannot be deleted — deactivate them instead.</>}
-        confirmLabel="Delete" onConfirm={async () => done(await deleteStudent(student.id))} />
+      {confirm === "delete" && (
+        <StudentDeleteDialog ids={[student.id]} name={student.full_name} onClose={() => setConfirm(null)}
+          onConfirm={async ([id]) => done(await deleteStudent(id))} />
+      )}
       {temp && <TempPasswordDialog open onClose={() => setTemp(null)} email={student.email} password={temp} title="Password reset" />}
     </>
   );

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/data/lookups";
+import { readParams } from "@/lib/url";
 import type { FacultyOffering } from "@/lib/analytics/faculty";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -11,6 +12,7 @@ import { RatingDisplay } from "@/components/ui/rating-display";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
+import { SemesterSelector } from "@/components/ui/semester-selector";
 
 export const metadata: Metadata = { title: "Evaluation Results" };
 
@@ -20,23 +22,33 @@ const VISIBILITY_TEXT = {
   manual: "Results become visible when released by the administrator.",
 };
 
-export default async function FacultyResultsPage() {
+export default async function FacultyResultsPage({ searchParams }: PageProps<"/faculty/results">) {
   await requireRole("faculty");
+  const params = await readParams(searchParams);
   const supabase = await createClient();
   const [{ data }, settings] = await Promise.all([supabase.rpc("get_faculty_offerings"), getSettings()]);
   const offerings = (data ?? []) as FacultyOffering[];
+  const periods = [...new Map(offerings.map((o) => [o.period_id, { id: o.period_id, label: o.period_label, is_current: o.is_current }])).values()];
+  // Default: the current semester when it has classes, otherwise all semesters.
+  const periodId = params.period === "all" ? undefined
+    : periods.some((p) => p.id === params.period) ? params.period
+    : periods.find((p) => p.is_current)?.id;
   const byPeriod = new Map<string, FacultyOffering[]>();
-  for (const o of offerings) byPeriod.set(o.period_label, [...(byPeriod.get(o.period_label) ?? []), o]);
+  for (const o of offerings) {
+    if (periodId && o.period_id !== periodId) continue;
+    byPeriod.set(o.period_label, [...(byPeriod.get(o.period_label) ?? []), o]);
+  }
 
   return (
     <>
       <PageHeader title="Evaluation Results" description="Aggregate, anonymous results for each class you handle."
-        breadcrumbs={[{ label: "Home", href: "/faculty/dashboard" }, { label: "Evaluation Results" }]} />
+        breadcrumbs={[{ label: "Home", href: "/faculty/dashboard" }, { label: "Evaluation Results" }]}
+        actions={periods.length > 0 ? <SemesterSelector periods={periods} value={periodId ?? "all"} includeAll /> : undefined} />
       <Alert tone="info" className="mb-5">
         {VISIBILITY_TEXT[settings.results_visibility]} To protect anonymity, a class needs at least {settings.min_respondents} respondents before results are shown.
         Individual students are never identified.
       </Alert>
-      {offerings.length === 0 ? <Card><EmptyState title="No classes yet" /></Card> : (
+      {byPeriod.size === 0 ? <Card><EmptyState title={offerings.length ? "No classes in this semester" : "No classes yet"} /></Card> : (
         <div className="space-y-5">
           {[...byPeriod.entries()].map(([label, list]) => (
             <Card key={label} outline={list[0].is_current ? "brand" : "none"}>

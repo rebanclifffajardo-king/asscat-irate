@@ -99,7 +99,7 @@ proxy.ts             session refresh + optimistic role routing
 
 ### Data model (normalized)
 
-`departments` ← `programs` ← `students` / `faculty` (a composite FK plus a trigger keep the faculty department equal to the program's department) · `year_levels` · `academic_periods` (one row per school year + semester, with a single "current" period) · `subjects` → `subject_offerings` (subject + faculty + program + period + section; soft-deleted) → `subject_enrollments` → `evaluation_attempts` (unique per student + offering + period; composite FKs guarantee enrollment and a matching period) → `evaluation_answers` / `evaluation_comments` · `question_categories` → `questions` · `notifications` · `activity_logs` (append-only) · `system_settings`.
+`departments` ← `programs` ← `students` / `faculty` (a composite FK plus a trigger keep the faculty department equal to the program's department) · `year_levels` · `academic_periods` (one row per school year + semester, with a single "current" period) · `subjects` → `subject_offerings` (subject + faculty + program + period + section; deleting one permanently removes its enrollments and evaluations in one transaction via `admin_delete_offerings`) → `subject_enrollments` → `evaluation_attempts` (unique per student + offering + period; composite FKs guarantee enrollment and a matching period) → `evaluation_answers` / `evaluation_comments` · `question_categories` → `questions` · `notifications` · `activity_logs` (append-only) · `system_settings`.
 
 **Historical integrity:** each answer stores a snapshot of the question title and text, the category name, the rating label and the scale maximum at submission. Editing or deactivating a question never changes past results. Questions that have been answered cannot be deleted, only deactivated.
 
@@ -137,7 +137,7 @@ npm run db:types     # regenerate types/database.ts from a migrated database (se
 - **Business rules:** enrollment, open window, duplicate and late submissions, edits after submission.
 - **Imports:** atomic rollback, duplicates are preserved.
 - **Analytics:** results match direct counts.
-- **Other:** historical snapshot integrity, anonymity threshold, notifications, soft delete.
+- **Other:** historical snapshot integrity, anonymity threshold, notifications, permanent class and student deletion (cascade, rollback, admin-only).
 
 ```bash
 DATABASE_ADMIN_URL=postgresql://postgres@127.0.0.1:5432/postgres ./supabase/tests/run.sh
@@ -149,6 +149,6 @@ Never point it at a real project.
 
 Templates are in `public/templates/`. They can also be downloaded from the import pages.
 
-- **Course file:** one row per enrolled student, with Subject Code, Subject Title, Faculty ID, Program, Department (optional), Student ID, School Year, Semester and Section.
-- **Evaluation file:** one row per answered question, with Student ID, Subject Code, Faculty ID, School Year, Semester, Section, Question (title or exact text), Rating, Comment and Submitted At.
+- **Course file:** one row per enrolled student, with Course Number, Descriptive Title, Faculty ID, Program, Department (optional), Student ID, School Year, Semester and Section.
+- **Evaluation file:** one row per answered question, with Student ID, Course Number, Faculty ID, School Year, Semester, Section, Question (title or exact text), Rating, Comment and Submitted At.
 # asscat-irate

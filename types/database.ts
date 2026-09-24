@@ -1483,6 +1483,8 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_delete_offerings: { Args: { p_offering_ids: string[] }; Returns: Json }
+      admin_delete_students: { Args: { p_student_ids: string[] }; Returns: Json }
       admin_import_course_rows: { Args: { p_rows: Json }; Returns: Json }
       admin_import_evaluation_rows: { Args: { p_rows: Json }; Returns: Json }
       admin_release_results: {

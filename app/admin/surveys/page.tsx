@@ -18,6 +18,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { AddOfferingButton } from "@/components/admin/survey/add-offering-button";
 import { OfferingRowActions } from "@/components/admin/survey/offering-row-actions";
+import { BulkDeleteOfferingsButton } from "@/components/admin/bulk-actions";
 import { formatDateTime, semesterLabel } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Survey" };
@@ -44,23 +45,30 @@ export default async function SurveysPage({ searchParams }: PageProps<"/admin/su
     supabase.from("faculty_overview").select("id, faculty_number, sort_name, program_id").eq("is_active", true).order("sort_name"),
   ]);
 
+  const facultyOpts = (faculty ?? []).map((f) => ({ id: f.id!, label: `${f.sort_name} (${f.faculty_number})`, program_id: f.program_id! }));
+  const offeringName = (r: { subject_code: string | null; section: string | null; faculty_name: string | null }) =>
+    `${r.subject_code}${r.section ? ` (${r.section})` : ""} – ${r.faculty_name}`;
+
   type Row = NonNullable<typeof data>[number];
   const columns: Column<Row>[] = [
     { key: "n", header: "#", hideOnMobile: true, className: "w-10 text-gray-400", cell: (r) => lq.from + (data ?? []).indexOf(r) + 1 },
-    { key: "code", header: "Subject Code", sortKey: "subject_code", className: "whitespace-nowrap", cell: (r) => (
+    { key: "code", header: "Course Number", sortKey: "subject_code", className: "whitespace-nowrap", cell: (r) => (
       <Link href={`/admin/surveys/${r.id}`} className="font-semibold text-gray-900 hover:text-brand-600">
         {r.subject_code}{r.section ? <span className="ml-1 text-xs font-normal text-gray-500">({r.section})</span> : null}
       </Link>
     ) },
-    { key: "title", header: "Subject Title", sortKey: "subject_title", primary: true, cell: (r) => (
+    { key: "title", header: "Descriptive Title", sortKey: "subject_title", primary: true, cell: (r) => (
       <Link href={`/admin/surveys/${r.id}`} className="hover:text-brand-600"><span className="md:hidden font-semibold">{r.subject_code} — </span>{r.subject_title}</Link>
     ) },
-    { key: "teacher", header: "Teacher", sortKey: "faculty_name", cell: (r) => r.faculty_name },
+    { key: "teacher", header: "Instructor", sortKey: "faculty_name", cell: (r) => r.faculty_name },
     { key: "sem", header: "Semester", className: "whitespace-nowrap", cell: (r) => semesterLabel(r.semester ?? 1) },
     { key: "sy", header: "School Year", className: "whitespace-nowrap", cell: (r) => r.school_year },
     { key: "progress", header: "Progress", sortKey: "progress_pct", cell: (r) => <EvaluationProgress completed={r.completed_count ?? 0} total={r.enrolled_count ?? 0} compact /> },
     { key: "actions", header: "Action", isAction: true, className: "w-16 text-right", cell: (r) => (
-      <OfferingRowActions id={r.id!} name={`${r.subject_code}${r.section ? ` (${r.section})` : ""} – ${r.faculty_name}`} completed={r.completed_count ?? 0} />
+      <OfferingRowActions
+        offering={{ id: r.id!, name: offeringName(r), completed: r.completed_count ?? 0, faculty_id: r.faculty_id!, faculty_name: r.faculty_name ?? "", section: r.section ?? "" }}
+        faculty={facultyOpts}
+      />
     ) },
   ];
 
@@ -86,7 +94,7 @@ export default async function SurveysPage({ searchParams }: PageProps<"/admin/su
               <AddOfferingButton
                 period={{ id: period.id, label: period.label }}
                 subjects={(subjects ?? []).map((s) => ({ id: s.id, label: `${s.code} – ${s.title}` }))}
-                faculty={(faculty ?? []).map((f) => ({ id: f.id!, label: `${f.sort_name} (${f.faculty_number})`, program_id: f.program_id! }))}
+                faculty={facultyOpts}
                 programs={programs.filter((p) => p.is_active).map((p) => ({ id: p.id, label: `${p.code} – ${p.name}` }))}
               />
               <Link href="/admin/surveys/import-course" className={buttonClasses("secondary")}><FileUp className="h-4 w-4" /> Import Course File</Link>
@@ -100,13 +108,14 @@ export default async function SurveysPage({ searchParams }: PageProps<"/admin/su
 
           <Card outline="brand">
             <div className="grid gap-3 p-4 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end">
-              <SearchInput placeholder="Search subject, teacher…" className="sm:col-span-2 lg:w-72" />
+              <SearchInput placeholder="Search subject, instructor…" className="sm:col-span-2 lg:w-72" />
               <FilterSelect param="department" label="Department" options={departments.map((d) => ({ value: d.id, label: d.code }))} allLabel="All departments" className="lg:w-44" />
               <FilterSelect param="program" label="Program" options={programs.map((p) => ({ value: p.id, label: p.code }))} allLabel="All programs" className="lg:w-40" />
               <FilterSelect param="progress" label="Progress" options={[{ value: "none", label: "Not started" }, { value: "partial", label: "In progress" }, { value: "complete", label: "Complete" }]} className="lg:w-40" />
             </div>
             <DataTable columns={columns} rows={data ?? []} rowKey={(r) => r.id!} basePath="/admin/surveys" params={params} sort={lq.sort} dir={lq.dir}
               caption="List of evaluations"
+              selection={{ rowLabel: offeringName, actions: <BulkDeleteOfferingsButton /> }}
               empty={<EmptyState title="No subjects in this survey" description={lq.q || params.program || params.department ? "Try changing the filters." : "Add a subject or import a course file."} />} />
             <Pagination page={lq.page} pageSize={lq.pageSize} total={count ?? 0} basePath="/admin/surveys" params={params} />
           </Card>

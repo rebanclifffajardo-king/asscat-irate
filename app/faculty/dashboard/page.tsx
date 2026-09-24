@@ -12,6 +12,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { AnalyticsCard } from "@/components/ui/stat-card";
 import { FacultyAvatar } from "@/components/ui/faculty-avatar";
 import { FilterSelect } from "@/components/ui/filter-select";
+import { SemesterSelector } from "@/components/ui/semester-selector";
 import { EvaluationProgress } from "@/components/ui/evaluation-progress";
 import { RatingDisplay, ratingLabel } from "@/components/ui/rating-display";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -32,7 +33,8 @@ export default async function FacultyDashboard({ searchParams }: PageProps<"/fac
     supabase.from("academic_periods").select("id, label").eq("is_current", true).maybeSingle(),
   ]);
   const offerings = (offeringsData ?? []) as FacultyOffering[];
-  const periods = [...new Map(offerings.map((o) => [o.period_id, { id: o.period_id, label: o.period_label }])).values()];
+  const periods = [...new Map(offerings.map((o) => [o.period_id, { id: o.period_id, label: o.period_label, is_current: o.is_current }])).values()];
+  if (current && !periods.some((p) => p.id === current.id)) periods.unshift({ id: current.id, label: current.label ?? "", is_current: true });
   const periodId = params.period === "all" ? undefined : periods.some((p) => p.id === params.period) ? params.period : current?.id;
   const offeringId = offerings.some((o) => o.offering_id === params.subject) ? params.subject : undefined;
 
@@ -60,8 +62,7 @@ export default async function FacultyDashboard({ searchParams }: PageProps<"/fac
           </CardBody>
         </Card>
         <div className="grid gap-3 rounded-md bg-white p-3 shadow-card sm:grid-cols-2">
-          <FilterSelect param="period" label="School year & semester" options={[{ value: "all", label: "All semesters" }, ...periods.map((p) => ({ value: p.id, label: p.label }))]}
-            allLabel={current ? `${current.label} (current)` : "Current semester"} resetParams={["subject"]} />
+          <SemesterSelector periods={periods} value={periodId ?? "all"} includeAll resetParams={["subject"]} />
           <FilterSelect param="subject" label="Subject" options={inScope.length || offeringId ? offerings.filter((o) => !periodId || o.period_id === periodId).map((o) => ({ value: o.offering_id, label: `${o.subject_code}${o.section ? ` (${o.section})` : ""} – ${o.subject_title}` })) : []}
             allLabel="All subjects" />
         </div>

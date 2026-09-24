@@ -17,10 +17,10 @@ function SubjectModal({ onClose, subject }: { onClose: () => void; subject?: Sub
     <FormModal open onClose={onClose} title={subject ? "Edit Subject" : "Add Subject"} submitLabel={subject ? "Save" : "Add"}
       pending={pending} error={error} onSubmit={(v) => run({ ...v, id: subject?.id })}>
       <div className="grid gap-4 sm:grid-cols-[1fr_2fr]">
-        <Field label="Subject Code" htmlFor="code" error={fe.code} required>
+        <Field label="Course Number" htmlFor="code" error={fe.code} required>
           <Input id="code" name="code" defaultValue={subject?.code} maxLength={30} className="uppercase" aria-describedby="code-msg" />
         </Field>
-        <Field label="Subject Title" htmlFor="title" error={fe.title} required>
+        <Field label="Descriptive Title" htmlFor="title" error={fe.title} required>
           <Input id="title" name="title" defaultValue={subject?.title} maxLength={200} aria-describedby="title-msg" />
         </Field>
       </div>

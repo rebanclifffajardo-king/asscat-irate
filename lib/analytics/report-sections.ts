@@ -31,7 +31,7 @@ export function buildReportSections(a: AdminAnalytics, scaleLabels: string[]): R
     { title: "Participation by Program", sheet: "Participation by Program", columns: ["Program", "Completed", "Expected", "Completion %"], rows: a.participation_by_program.map((p) => [p.code, p.completed, p.expected, completionRate(p.completed, p.expected)]) },
     { title: "Completion by Year Level", sheet: "Completion by Year Level", columns: ["Year Level", "Completed", "Expected", "Completion %"], rows: a.completion_by_year_level.map((p) => [p.name, p.completed, p.expected, completionRate(p.completed, p.expected)]) },
     { title: "Respondents per Faculty", sheet: "Respondents per Faculty", columns: ["Faculty", "Department", "Respondents", "Expected", "Average"], rows: a.faculty_respondents.map((f) => [f.name, f.department_code, f.respondents, f.expected, f.respondents >= a.min_respondents ? r2(f.average) : null]) },
-    { title: "Subject Evaluation Trends", sheet: "Subject Trends", columns: ["Subject", "Semester", "Average"], rows: a.subject_trends.map((t) => [t.subject_code, t.label, r2(t.average)]) },
+    { title: "Subject Evaluation Trends", sheet: "Subject Trends", columns: ["Course Number", "Semester", "Average"], rows: a.subject_trends.map((t) => [t.subject_code, t.label, r2(t.average)]) },
     { title: "Submission Activity by Date", sheet: "Submissions by Date", columns: ["Date", "Submitted"], rows: a.submissions_by_date.map((d) => [d.day, d.count]) },
   ];
 }

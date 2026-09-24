@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { LogoMark } from "@/components/brand/Logo";
 import { FacultyAvatar } from "@/components/ui/faculty-avatar";
-import { signOut } from "@/app/actions/auth";
+import { LogoutButton } from "@/components/auth/logout-button";
 import type { AppRole } from "@/lib/auth/roles";
 import { ROLE_HOME, ROLE_LABEL } from "@/lib/auth/roles";
 import { NAV, type NavKey } from "./nav";
@@ -100,19 +100,16 @@ export function AppSidebar({ user, collapsed, onNavigate }: Props) {
             );
           })}
           <li className="pt-1">
-            <form action={signOut}>
-              <button
-                type="submit"
-                title={collapsed ? "Logout" : undefined}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[15px] transition-colors hover:bg-sidebar-hover hover:text-white",
-                  collapsed && "justify-center px-0",
-                )}
-              >
-                <LogOut className="h-[18px] w-[18px] shrink-0" aria-hidden />
-                <span className={cn(collapsed && "sr-only")}>Logout</span>
-              </button>
-            </form>
+            <LogoutButton
+              title={collapsed ? "Logout" : undefined}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[15px] transition-colors hover:bg-sidebar-hover hover:text-white",
+                collapsed && "justify-center px-0",
+              )}
+            >
+              <LogOut className="h-[18px] w-[18px] shrink-0" aria-hidden />
+              <span className={cn(collapsed && "sr-only")}>Logout</span>
+            </LogoutButton>
           </li>
         </ul>
       </nav>

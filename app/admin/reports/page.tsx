@@ -163,7 +163,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/admin/re
           <RespondentsTable a={a} />
         </Card>
         <ChartCard title="Subject evaluation trends" description="Average rating over time for the five most-evaluated subjects" empty={!subjectTrend.length} className="lg:col-span-2"
-          table={{ columns: ["Subject", "Semester", "Average"], rows: a.subject_trends.map((t) => [t.subject_code, t.label, formatRating(t.average)]) }}>
+          table={{ columns: ["Course Number", "Semester", "Average"], rows: a.subject_trends.map((t) => [t.subject_code, t.label, formatRating(t.average)]) }}>
           <TrendChart data={subjectTrend} xKey="label" series={subjectCodes.map((c) => ({ key: c, label: c }))} domain={[1, max]} height={300} />
         </ChartCard>
         <ChartCard title="Evaluation submission activity by date" description="Evaluations submitted per day" empty={!a.submissions_by_date.length} className="lg:col-span-2"

@@ -7,7 +7,7 @@ export const offeringSchema = z.object({
   subject_id: z.string().optional(),
   new_subject_code: z.string().optional(),
   new_subject_title: z.string().optional(),
-  faculty_id: uuid("Teacher"),
+  faculty_id: uuid("Instructor"),
   program_id: uuid("Program"),
   section: optionalText(30).transform((v) => (v ?? "").toUpperCase()),
 }).superRefine((v, ctx) => {
@@ -16,11 +16,17 @@ export const offeringSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["subject_id"], message: "Select a subject." });
     }
   } else {
-    const c = code("Subject code", 30).safeParse(v.new_subject_code ?? "");
+    const c = code("Course number", 30).safeParse(v.new_subject_code ?? "");
     if (!c.success) ctx.addIssue({ code: "custom", path: ["new_subject_code"], message: c.error.issues[0].message });
-    const t = requiredText("Subject title", 200).safeParse(v.new_subject_title ?? "");
+    const t = requiredText("Descriptive title", 200).safeParse(v.new_subject_title ?? "");
     if (!t.success) ctx.addIssue({ code: "custom", path: ["new_subject_title"], message: t.error.issues[0].message });
   }
+});
+
+export const offeringUpdateSchema = z.object({
+  id: uuid("Class"),
+  faculty_id: uuid("Instructor"),
+  section: optionalText(30).transform((v) => (v ?? "").toUpperCase()),
 });
 
 export const enrollSchema = z.object({

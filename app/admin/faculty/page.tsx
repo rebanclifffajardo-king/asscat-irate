@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { FileUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getDepartments, getPrograms } from "@/lib/data/lookups";
 import { listQuery, likePattern, readParams } from "@/lib/url";
@@ -12,6 +13,8 @@ import { SearchInput } from "@/components/ui/search-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BulkDeleteFacultyButton } from "@/components/admin/bulk-actions";
+import { buttonClasses } from "@/components/ui/button";
 import { FacultyAvatar } from "@/components/ui/faculty-avatar";
 import { AddFacultyButton, FacultyRowActions } from "@/components/admin/people/faculty-form";
 
@@ -69,7 +72,7 @@ export default async function FacultyPage({ searchParams }: PageProps<"/admin/fa
 
   return (
     <>
-      <PageHeader title="Faculty" breadcrumbs={[{ label: "Home", href: "/admin/dashboard" }, { label: "Faculty" }]} actions={<AddFacultyButton programs={programs} />} />
+      <PageHeader title="Faculty" breadcrumbs={[{ label: "Home", href: "/admin/dashboard" }, { label: "Faculty" }]} actions={<div className="flex flex-wrap gap-2"><Link href="/admin/faculty/import" className={buttonClasses("secondary")}><FileUp className="h-4 w-4" /> Import CSV</Link><AddFacultyButton programs={programs} /></div>} />
       <Card outline="brand">
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end">
           <SearchInput placeholder="Search ID, name, email…" className="sm:col-span-2 lg:w-72" />
@@ -78,7 +81,9 @@ export default async function FacultyPage({ searchParams }: PageProps<"/admin/fa
           <FilterSelect param="status" label="Status" options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]} className="lg:w-36" />
         </div>
         <DataTable columns={columns} rows={data ?? []} rowKey={(r) => r.id!} basePath="/admin/faculty" params={params} sort={lq.sort} dir={lq.dir}
-          caption="Faculty" empty={<EmptyState title="No faculty found" description="Adjust the filters or add a faculty member." />} />
+          caption="Faculty"
+          selection={{ rowLabel: (r) => `${r.last_name}, ${r.first_name} (${r.faculty_number})`, actions: <BulkDeleteFacultyButton /> }}
+          empty={<EmptyState title="No faculty found" description="Adjust the filters or add a faculty member." />} />
         <Pagination page={lq.page} pageSize={lq.pageSize} total={count ?? 0} basePath="/admin/faculty" params={params} />
       </Card>
     </>

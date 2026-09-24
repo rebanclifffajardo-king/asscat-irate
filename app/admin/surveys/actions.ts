@@ -4,9 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { assertRole } from "@/lib/auth/session";
-import { dbError, parseInput, runAction, UserFacingError, type ActionResult } from "@/lib/actions";
+import { bulkIds, bulkMessage, dbError, parseInput, runAction, UserFacingError, type ActionResult, type BulkResult } from "@/lib/actions";
 import { logActivity } from "@/lib/activity";
-import { enrollSchema, offeringSchema } from "@/lib/validation/survey";
+import { enrollSchema, offeringSchema, offeringUpdateSchema } from "@/lib/validation/survey";
 import { subjectSchema } from "@/lib/validation/master";
 import { likePattern } from "@/lib/url";
 
@@ -20,7 +20,7 @@ export async function createOffering(raw: unknown): Promise<ActionResult<{ id: s
     if (v.subject_mode === "new") {
       const s = parseInput(subjectSchema, { code: v.new_subject_code, title: v.new_subject_title, is_active: true });
       const { data, error } = await supabase.from("subjects").insert({ code: s.code, title: s.title, created_by: user.id }).select("id").single();
-      if (error) throw dbError(error, { unique: `Subject code ${s.code} already exists. Choose "Existing subject" instead.` });
+      if (error) throw dbError(error, { unique: `Course number ${s.code} already exists. Choose "Existing subject" instead.` });
       subjectId = data.id;
     }
 
@@ -28,7 +28,7 @@ export async function createOffering(raw: unknown): Promise<ActionResult<{ id: s
       subject_id: subjectId!, faculty_id: v.faculty_id, program_id: v.program_id,
       academic_period_id: v.academic_period_id, section: v.section, created_by: user.id,
     }).select("id").single();
-    if (error) throw dbError(error, { unique: "This subject is already assigned to this teacher and section for the selected semester." });
+    if (error) throw dbError(error, { unique: "This subject is already assigned to this instructor and section for the selected semester." });
 
     const { data: o } = await supabase.from("offering_overview").select("subject_code, faculty_name, period_label").eq("id", data.id).single();
     await logActivity({
@@ -41,24 +41,103 @@ export async function createOffering(raw: unknown): Promise<ActionResult<{ id: s
   }, "Subject added to the survey.");
 }
 
-/** Soft delete: evaluation history for the class is preserved. */
-export async function deleteOffering(id: string): Promise<ActionResult<null>> {
+/** Changing the instructor keeps existing evaluations attached to this offering. */
+export async function updateOffering(raw: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await assertRole("admin");
-    const oid = parseInput(z.uuid(), id);
+    const v = parseInput(offeringUpdateSchema, raw);
     const supabase = await createClient();
-    const { data: o } = await supabase.from("offering_overview").select("subject_code, section, faculty_name, period_label, completed_count").eq("id", oid).maybeSingle();
-    if (!o) throw new UserFacingError("Class not found.");
-    const { error } = await supabase.from("subject_offerings").update({ deleted_at: new Date().toISOString(), deleted_by: user.id }).eq("id", oid);
-    if (error) throw dbError(error);
+    const { data: before } = await supabase.from("offering_overview")
+      .select("subject_code, section, faculty_id, faculty_name, period_label, completed_count").eq("id", v.id).maybeSingle();
+    if (!before) throw new UserFacingError("Class not found.");
+    if (before.faculty_id === v.faculty_id && (before.section ?? "") === v.section) return null;
+
+    if (before.faculty_id !== v.faculty_id) {
+      const { data: f } = await supabase.from("faculty").select("is_active").eq("id", v.faculty_id).maybeSingle();
+      if (!f?.is_active) throw new UserFacingError("Select a valid, active instructor.", { faculty_id: ["Select a valid, active instructor."] });
+    }
+    const { error } = await supabase.from("subject_offerings")
+      .update({ faculty_id: v.faculty_id, section: v.section }).eq("id", v.id).is("deleted_at", null);
+    if (error) throw dbError(error, { unique: "This subject is already assigned to this instructor and section for this semester.", foreignKey: "Select a valid instructor." });
+
+    const { data: after } = await supabase.from("offering_overview").select("faculty_name").eq("id", v.id).maybeSingle();
+    const changes = [
+      before.faculty_id !== v.faculty_id && `instructor ${before.faculty_name} → ${after?.faculty_name}`,
+      (before.section ?? "") !== v.section && `section ${before.section || "(none)"} → ${v.section || "(none)"}`,
+    ].filter(Boolean).join("; ");
     await logActivity({
-      user, module: "Survey", action: "Deleted subject offering",
-      description: `${o.subject_code}${o.section ? ` (${o.section})` : ""} – ${o.faculty_name} – ${o.period_label} (${o.completed_count} completed evaluations archived)`,
-      entityType: "subject_offerings", entityId: oid,
+      user, module: "Survey", action: "Updated subject offering",
+      description: `${before.subject_code} – ${before.period_label}: ${changes}${before.completed_count ? ` (${before.completed_count} submitted evaluation(s) stay attached)` : ""}`,
+      entityType: "subject_offerings", entityId: v.id,
+      metadata: { before: { faculty_id: before.faculty_id, section: before.section }, after: { faculty_id: v.faculty_id, section: v.section } },
     });
     revalidatePath("/admin/surveys");
+    revalidatePath(`/admin/surveys/${v.id}`);
     return null;
-  }, "Subject removed from the survey. Historical records were archived.");
+  }, "Class updated.");
+}
+
+export type { BulkResult };
+
+export type OfferingDeletionImpact = { offerings: number; enrollments: number; completed: number; inProgress: number };
+
+/** What a permanent delete of these classes would remove (for the confirmation dialog). */
+export async function getOfferingDeletionImpact(ids: string[]): Promise<ActionResult<OfferingDeletionImpact>> {
+  return runAction(async () => {
+    await assertRole("admin");
+    const oids = [...new Set(parseInput(bulkIds, ids))];
+    const supabase = await createClient();
+    const { data, error } = await supabase.from("offering_overview").select("enrolled_count, completed_count, in_progress_count").in("id", oids);
+    if (error) throw dbError(error);
+    const sum = (k: "enrolled_count" | "completed_count" | "in_progress_count") => (data ?? []).reduce((n, o) => n + (o[k] ?? 0), 0);
+    return { offerings: data?.length ?? 0, enrollments: sum("enrolled_count"), completed: sum("completed_count"), inProgress: sum("in_progress_count") };
+  });
+}
+
+type DeleteSummary = { offering_ids: string[]; offerings: number; enrollments: number; attempts: number; completed: number; answers: number; comments: number };
+
+/**
+ * Permanent delete of classes and everything that depends on them
+ * (enrollments, evaluation attempts, answers, comments) in one database
+ * transaction — see admin_delete_offerings. Students, faculty and subjects
+ * are never touched.
+ */
+async function purgeOfferings(ids: string[]): Promise<BulkResult> {
+  const user = await assertRole("admin");
+  const supabase = await createClient();
+  const { data: before } = await supabase.from("offering_overview").select("id, subject_code, section, faculty_name, period_label").in("id", ids);
+  const label = new Map((before ?? []).map((o) => [o.id!, `${o.subject_code}${o.section ? ` (${o.section})` : ""} – ${o.faculty_name} – ${o.period_label}`]));
+  const known = ids.filter((id) => label.has(id));
+  const skipped: BulkResult["skipped"] = ids.filter((id) => !label.has(id)).map((id) => ({ id, label: "Unknown class", reason: "not found" }));
+  if (!known.length) throw new UserFacingError(ids.length === 1 ? "Class not found. It may have been deleted already." : "None of the selected classes were found.");
+
+  const { data, error } = await supabase.rpc("admin_delete_offerings", { p_offering_ids: known });
+  if (error) throw dbError(error, { foreignKey: "The class could not be deleted because other records still depend on it. Nothing was deleted." });
+  const r = data as unknown as DeleteSummary;
+  for (const id of known) if (!r.offering_ids.includes(id)) skipped.push({ id, label: label.get(id)!, reason: "not found" });
+
+  await logActivity({
+    user, module: "Survey", action: r.offerings === 1 ? "Permanently deleted subject offering" : "Permanently deleted subject offerings",
+    description: `${r.offering_ids.map((id) => label.get(id)).join("; ")} — removed ${r.enrollments} enrollment(s), ${r.attempts} evaluation attempt(s) (${r.completed} submitted), ${r.answers} answer(s), ${r.comments} comment(s).`,
+    entityType: "subject_offerings", entityId: r.offerings === 1 ? r.offering_ids[0] : undefined,
+    metadata: { ...r },
+  });
+  revalidatePath("/admin/surveys");
+  return { done: r.offerings, skipped };
+}
+
+/** Permanently deletes classes (bulk). Classes with evaluations are deleted too, after the UI's explicit confirmation. */
+export async function deleteOfferings(ids: string[]): Promise<ActionResult<BulkResult>> {
+  const res = await runAction(async () => purgeOfferings([...new Set(parseInput(bulkIds, ids))]));
+  return res.ok ? { ...res, message: bulkMessage(res.data.done, "deleted", res.data.skipped) } : res;
+}
+
+/** Permanently deletes one class with all its enrollments and evaluation records. */
+export async function deleteOffering(id: string): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    await purgeOfferings([parseInput(z.uuid(), id)]);
+    return null;
+  }, "Subject and all of its evaluation records were permanently deleted.");
 }
 
 export async function enrollStudents(raw: unknown): Promise<ActionResult<{ added: number }>> {
@@ -91,6 +170,61 @@ export async function removeEnrollment(input: { enrollmentId: string; offeringId
     revalidatePath(`/admin/surveys/${v.offeringId}`);
     return null;
   }, "Student removed from the class.");
+}
+
+/** Bulk version of removeEnrollment: students with an evaluation attempt are skipped. */
+export async function removeEnrollments(input: { offeringId: string; enrollmentIds: string[] }): Promise<ActionResult<BulkResult>> {
+  const res = await runAction(async () => {
+    const user = await assertRole("admin");
+    const v = parseInput(z.object({ offeringId: z.uuid(), enrollmentIds: z.array(z.string()) }), input);
+    const ids = [...new Set(parseInput(bulkIds, v.enrollmentIds))];
+    const supabase = await createClient();
+    const { data, error } = await supabase.from("enrollment_overview")
+      .select("id, student_id, student_number, student_name, attempt_id").eq("offering_id", v.offeringId).in("id", ids);
+    if (error) throw dbError(error);
+    const found = new Map((data ?? []).map((e) => [e.id!, e]));
+    const label = (id: string) => { const e = found.get(id); return e ? `${e.student_name} (${e.student_number})` : "Unknown student"; };
+
+    const skipped: BulkResult["skipped"] = [];
+    const candidates: string[] = [];
+    for (const id of ids) {
+      const e = found.get(id);
+      if (!e) skipped.push({ id, label: label(id), reason: "not found" });
+      else if (e.attempt_id) skipped.push({ id, label: label(id), reason: "has an evaluation" });
+      else candidates.push(id);
+    }
+
+    // Same rule as removeEnrollment: the FK from evaluation_attempts blocks the
+    // delete. If an attempt appeared since the check, retry row by row.
+    let removed: string[] = [];
+    if (candidates.length) {
+      const del = await supabase.from("subject_enrollments").delete().eq("offering_id", v.offeringId).in("id", candidates).select("id");
+      if (!del.error) removed = (del.data ?? []).map((r) => r.id);
+      else if (del.error.code === "23503") {
+        for (const id of candidates) {
+          const one = await supabase.from("subject_enrollments").delete().eq("id", id).select("id").maybeSingle();
+          if (one.error?.code === "23503") skipped.push({ id, label: label(id), reason: "has an evaluation" });
+          else if (one.error) throw dbError(one.error);
+          else if (one.data) removed.push(id);
+        }
+      } else throw dbError(del.error);
+      for (const id of candidates) {
+        if (!removed.includes(id) && !skipped.some((s) => s.id === id)) skipped.push({ id, label: label(id), reason: "not found" });
+      }
+    }
+
+    if (removed.length) {
+      await logActivity({
+        user, module: "Survey", action: "Removed students from class",
+        description: `${removed.length} removed, ${skipped.length} skipped: ${removed.map((id) => found.get(id)?.student_number).join(", ")}`,
+        entityType: "subject_offerings", entityId: v.offeringId,
+        metadata: { student_ids: removed.map((id) => found.get(id)?.student_id ?? null), skipped: skipped.map((s) => ({ id: s.id, reason: s.reason })) },
+      });
+      revalidatePath(`/admin/surveys/${v.offeringId}`);
+    }
+    return { done: removed.length, skipped };
+  });
+  return res.ok ? { ...res, message: bulkMessage(res.data.done, "removed", res.data.skipped) } : res;
 }
 
 export async function resetEvaluationAttempt(input: { attemptId: string; offeringId: string }): Promise<ActionResult<null>> {
@@ -180,7 +314,7 @@ export async function saveSubject(raw: unknown): Promise<ActionResult<null>> {
     const { error } = id
       ? await supabase.from("subjects").update(v).eq("id", id)
       : await supabase.from("subjects").insert({ ...v, created_by: user.id });
-    if (error) throw dbError(error, { unique: `Subject code ${v.code} already exists.` });
+    if (error) throw dbError(error, { unique: `Course number ${v.code} already exists.` });
     await logActivity({ user, module: "Subjects", action: id ? "Updated subject" : "Created subject", description: `${v.code} – ${v.title}`, entityType: "subjects", entityId: id });
     revalidatePath("/admin/subjects");
     return null;

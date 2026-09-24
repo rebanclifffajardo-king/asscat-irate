@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { FileUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getCategories } from "@/lib/data/lookups";
 import { listQuery, likePattern, readParams } from "@/lib/url";
@@ -10,6 +12,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { Badge, StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { buttonClasses } from "@/components/ui/button";
 import { AddQuestionButton, QuestionRowActions } from "@/components/admin/questions/question-form";
 
 export const metadata: Metadata = { title: "Questions" };
@@ -55,7 +58,7 @@ export default async function QuestionsPage({ searchParams }: PageProps<"/admin/
         title="Questions"
         description="Evaluation questions answered by students on the Likert scale. Used questions can be deactivated but not deleted."
         breadcrumbs={[{ label: "Home", href: "/admin/dashboard" }, { label: "Questions" }]}
-        actions={<AddQuestionButton categories={categories} />}
+        actions={<div className="flex flex-wrap gap-2"><Link href="/admin/questions/import" className={buttonClasses("secondary")}><FileUp className="h-4 w-4" /> Import CSV</Link><AddQuestionButton categories={categories} /></div>}
       />
       <Card outline="brand">
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">

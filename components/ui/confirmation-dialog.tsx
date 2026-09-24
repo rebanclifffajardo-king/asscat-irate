@@ -13,9 +13,11 @@ type Props = {
   message: ReactNode;
   confirmLabel?: string;
   tone?: "danger" | "primary" | "warning";
+  /** e.g. until a required acknowledgement is ticked */
+  confirmDisabled?: boolean;
 };
 
-export function ConfirmationDialog({ open, onClose, onConfirm, title, message, confirmLabel = "Confirm", tone = "danger" }: Props) {
+export function ConfirmationDialog({ open, onClose, onConfirm, title, message, confirmLabel = "Confirm", tone = "danger", confirmDisabled = false }: Props) {
   const [busy, setBusy] = useState(false);
   const handle = async () => {
     setBusy(true);
@@ -36,7 +38,7 @@ export function ConfirmationDialog({ open, onClose, onConfirm, title, message, c
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant={tone === "primary" ? "primary" : tone} onClick={handle} loading={busy}>
+          <Button variant={tone === "primary" ? "primary" : tone} onClick={handle} loading={busy} disabled={confirmDisabled}>
             {confirmLabel}
           </Button>
         </>

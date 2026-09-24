@@ -1,10 +1,11 @@
 import "server-only";
 import type { ServerSupabase } from "@/lib/supabase/server";
 import { parseSchoolYear, parseSemester, parseSpreadsheet } from "./parse";
+import type { PreviewRow } from "./types";
 
 export const COURSE_COLUMNS: Record<string, string[]> = {
-  subject_code: ["subjectcode", "code", "coursecode"],
-  subject_title: ["subjecttitle", "title", "subjectname", "descriptivetitle", "coursetitle"],
+  subject_code: ["coursenumber", "courseno", "subjectcode", "code", "coursecode"],
+  subject_title: ["descriptivetitle", "subjecttitle", "title", "subjectname", "coursetitle"],
   faculty_id: ["facultyid", "teacherid", "instructorid", "facultynumber", "facultyno"],
   program: ["program", "programcode"],
   department: ["department", "departmentcode", "college"],
@@ -15,12 +16,7 @@ export const COURSE_COLUMNS: Record<string, string[]> = {
 };
 const REQUIRED = ["subject_code", "subject_title", "faculty_id", "program", "student_id", "school_year", "semester"];
 
-export type PreviewRow = {
-  row: number;
-  cells: Record<string, string>;
-  errors: string[];
-  warnings: string[];
-};
+export type { PreviewRow } from "./types";
 
 export type CoursePayloadRow = {
   subject_code: string; subject_title: string; faculty_number: string; program_code: string;
@@ -95,9 +91,9 @@ export async function validateCourseFile(file: File, supabase: ServerSupabase): 
     const year = parseSchoolYear(v.school_year ?? "");
     const sem = parseSemester(v.semester ?? "");
 
-    if (!code) errors.push("Subject Code is required.");
-    else if (code.length > 30) errors.push("Subject Code is too long.");
-    if (!title) errors.push("Subject Title is required.");
+    if (!code) errors.push("Course Number is required.");
+    else if (code.length > 30) errors.push("Course Number is too long.");
+    if (!title) errors.push("Descriptive Title is required.");
     if (section.length > 30) errors.push("Section is too long.");
 
     const f = facultyMap.get(fac);

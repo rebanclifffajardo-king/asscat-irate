@@ -1,17 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ChevronDown, KeyRound, LogOut, Menu, UserCircle } from "lucide-react";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { FacultyAvatar } from "@/components/ui/faculty-avatar";
 import { LogoMark } from "@/components/brand/Logo";
 import { ROLE_LABEL, ROLE_PREFIX } from "@/lib/auth/roles";
-import { signOut } from "@/app/actions/auth";
+import { LogoutDialog } from "@/components/auth/logout-button";
 import { NotificationDropdown } from "./notification-dropdown";
 import type { ShellUser } from "./app-sidebar";
 
 export function AppHeader({ user, unread, onToggleSidebar }: { user: ShellUser; unread: number; onToggleSidebar: () => void }) {
   const base = ROLE_PREFIX[user.role];
+  const [logout, setLogout] = useState(false);
   return (
     <header className="no-print sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-gray-200 bg-white px-2 sm:px-4">
       <button
@@ -59,13 +61,12 @@ export function AppHeader({ user, unread, onToggleSidebar }: { user: ShellUser; 
             <KeyRound className="h-4 w-4" /> Change Password
           </Link>
           <div className="my-1 border-t border-gray-100" />
-          <form action={signOut}>
-            <button role="menuitem" type="submit" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 focus:bg-red-50 focus:outline-none">
-              <LogOut className="h-4 w-4" /> Logout
-            </button>
-          </form>
+          <button role="menuitem" type="button" onClick={() => setLogout(true)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 focus:bg-red-50 focus:outline-none">
+            <LogOut className="h-4 w-4" /> Logout
+          </button>
         </DropdownMenu>
       </div>
+      <LogoutDialog open={logout} onClose={() => setLogout(false)} />
     </header>
   );
 }

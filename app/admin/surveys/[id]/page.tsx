@@ -20,6 +20,7 @@ import { AnalyticsCard } from "@/components/ui/stat-card";
 import { EvaluationProgress } from "@/components/ui/evaluation-progress";
 import { EnrollStudentsButton } from "@/components/admin/survey/enroll-students-button";
 import { EnrollmentRowActions } from "@/components/admin/survey/enrollment-row-actions";
+import { BulkRemoveEnrollmentsButton } from "@/components/admin/bulk-actions";
 import { semesterLabel } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Evaluation Details" };
@@ -48,8 +49,8 @@ export default async function OfferingDetailPage({ params, searchParams }: PageP
     ["Faculty ID", <span key="fid" className="font-mono">{faculty?.faculty_number}</span>],
     ["Faculty Name", o.faculty_name],
     ["Email", faculty?.email],
-    ["Subject Code", `${o.subject_code}${o.section ? ` (Section ${o.section})` : ""}`],
-    ["Subject Title", o.subject_title],
+    ["Course Number", `${o.subject_code}${o.section ? ` (Section ${o.section})` : ""}`],
+    ["Descriptive Title", o.subject_title],
     ["Program", `${o.program_code} – ${o.program_name}`],
     ["Department", `${o.department_code} – ${o.department_name}`],
     ["School Year", `S.Y. ${o.school_year}`],
@@ -79,7 +80,7 @@ export default async function OfferingDetailPage({ params, searchParams }: PageP
       />
       <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
         <Card outline="brand" className="self-start">
-          <CardHeader title="Teacher Information" />
+          <CardHeader title="Instructor Information" />
           <div className="flex flex-col items-center px-4 pt-5 text-center">
             <FacultyAvatar name={o.faculty_name ?? ""} src={publicStorageUrl("faculty-photos", faculty?.photo_path)} size="xl" className="ring-brand-100" />
             <p className="mt-3 text-lg font-semibold text-gray-900">{o.faculty_name}</p>
@@ -114,7 +115,9 @@ export default async function OfferingDetailPage({ params, searchParams }: PageP
               <FilterSelect param="status" label="Status" options={[{ value: "pending", label: "Pending" }, { value: "in_progress", label: "On-going" }, { value: "completed", label: "Completed" }]} className="sm:w-40" />
             </div>
             <DataTable columns={columns} rows={rows ?? []} rowKey={(r) => r.id!} basePath={`/admin/surveys/${id}`} params={sp} sort={lq.sort} dir={lq.dir}
-              caption="Students under subject" empty={<EmptyState title="No students found" description={lq.q || sp.status ? "Try changing the filters." : "Enroll students so they can evaluate this class."} />} />
+              caption="Students under subject"
+              selection={{ rowLabel: (r) => `${r.student_name} (${r.student_number})`, actions: <BulkRemoveEnrollmentsButton offeringId={id} /> }}
+              empty={<EmptyState title="No students found" description={lq.q || sp.status ? "Try changing the filters." : "Enroll students so they can evaluate this class."} />} />
             <Pagination page={lq.page} pageSize={lq.pageSize} total={count ?? 0} basePath={`/admin/surveys/${id}`} params={sp} />
           </Card>
         </div>

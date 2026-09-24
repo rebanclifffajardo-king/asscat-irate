@@ -33,7 +33,7 @@ export function AddOfferingButton({ period, subjects, faculty, programs }: {
           open
           onClose={() => setOpen(false)}
           title="Add Subject"
-          description={<>Assign a subject and teacher for <strong>{period.label}</strong>. Enroll students on the next screen.</>}
+          description={<>Assign a subject and instructor for <strong>{period.label}</strong>. Enroll students on the next screen.</>}
           submitLabel="Add Subject"
           pending={pending}
           error={error}
@@ -56,15 +56,15 @@ export function AddOfferingButton({ period, subjects, faculty, programs }: {
             </Field>
           ) : (
             <div className="grid gap-4 sm:grid-cols-[1fr_2fr]">
-              <Field label="Subject Code" htmlFor="new_subject_code" error={fe.new_subject_code} required>
+              <Field label="Course Number" htmlFor="new_subject_code" error={fe.new_subject_code} required>
                 <Input id="new_subject_code" name="new_subject_code" maxLength={30} className="uppercase" aria-describedby="new_subject_code-msg" />
               </Field>
-              <Field label="Subject Title" htmlFor="new_subject_title" error={fe.new_subject_title} required>
+              <Field label="Descriptive Title" htmlFor="new_subject_title" error={fe.new_subject_title} required>
                 <Input id="new_subject_title" name="new_subject_title" maxLength={200} aria-describedby="new_subject_title-msg" />
               </Field>
             </div>
           )}
-          <Field label="Teacher" htmlFor="faculty_id" error={fe.faculty_id} required>
+          <Field label="Instructor" htmlFor="faculty_id" error={fe.faculty_id} required>
             <Select
               id="faculty_id"
               name="faculty_id"
@@ -72,7 +72,7 @@ export function AddOfferingButton({ period, subjects, faculty, programs }: {
               onChange={(e) => { const f = faculty.find((x) => x.id === e.target.value); if (f && !programId) setProgramId(f.program_id); }}
               aria-describedby="faculty_id-msg"
             >
-              <option value="" disabled>Select teacher…</option>
+              <option value="" disabled>Select instructor…</option>
               {faculty.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
             </Select>
           </Field>

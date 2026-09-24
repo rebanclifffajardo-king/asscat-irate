@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Camera, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Field, Input } from "@/components/ui/field";
 import { useServerAction, formValues } from "@/lib/hooks/use-server-action";
 import { updateMyProfile, uploadMyAvatar } from "@/app/actions/profile";
@@ -13,21 +14,34 @@ export function AvatarUpload() {
   const router = useRouter();
   const ref = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
+  const [file, setFile] = useState<File | null>(null);
+  const clear = () => { setFile(null); if (ref.current) ref.current.value = ""; };
   return (
     <>
       <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label="Upload profile picture"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (!f) return;
-          if (f.size > 2 * 1024 * 1024) { toast.error("Image must be 2 MB or smaller."); return; }
+          if (f.size > 2 * 1024 * 1024) { toast.error("Image must be 2 MB or smaller."); e.target.value = ""; return; }
+          setFile(f);
+        }} />
+      <ConfirmationDialog
+        open={!!file}
+        onClose={clear}
+        tone="primary"
+        title="Change profile picture?"
+        message={<>Replace your current profile picture with <strong>{file?.name}</strong>?</>}
+        confirmLabel="Upload"
+        onConfirm={() => {
           const fd = new FormData();
-          fd.set("avatar", f);
+          fd.set("avatar", file!);
+          clear();
           startTransition(async () => {
             const res = await uploadMyAvatar(fd);
             if (res.ok) { toast.success(res.message); router.refresh(); } else toast.error(res.error);
-            if (ref.current) ref.current.value = "";
           });
-        }} />
+        }}
+      />
       <Button variant="secondary" size="sm" loading={pending} onClick={() => ref.current?.click()}>
         {!pending && <Camera className="h-4 w-4" />} Change picture
       </Button>

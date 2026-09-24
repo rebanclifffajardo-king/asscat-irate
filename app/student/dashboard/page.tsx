@@ -37,7 +37,9 @@ export default async function StudentDashboard({ searchParams }: PageProps<"/stu
     supabase.rpc("get_student_periods"),
     supabase.from("academic_periods").select("id, label, open_at, close_at").eq("is_current", true).maybeSingle(),
   ]);
-  const periodList = periods ?? [];
+  const periodList = (periods ?? []).map((p) => ({ id: p.id, label: p.label, is_current: p.is_current }));
+  // Offer the current period even when the student has no classes in it yet.
+  if (current && !periodList.some((p) => p.id === current.id)) periodList.unshift({ id: current.id, label: current.label ?? "", is_current: true });
   const periodId = periodList.some((p) => p.id === params.period) ? params.period : current?.id ?? periodList[0]?.id;
   const { data } = periodId ? await supabase.rpc("get_student_evaluations", { p_period_id: periodId }) : { data: [] };
   const rows = (data ?? []) as Row[];
@@ -79,7 +81,7 @@ export default async function StudentDashboard({ searchParams }: PageProps<"/stu
         title="My Evaluations"
         description={`Welcome, ${user.firstName ?? user.displayName}! Evaluate each instructor for the subjects you are enrolled in.`}
         breadcrumbs={[{ label: "Home" }, { label: "My Evaluations" }]}
-        actions={periodList.length > 1 && periodId ? <SemesterSelector periods={periodList.map((p) => ({ id: p.id, label: p.label, is_current: p.is_current }))} value={periodId} /> : undefined}
+        actions={periodId ? <SemesterSelector periods={periodList} value={periodId} /> : undefined}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

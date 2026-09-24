@@ -77,6 +77,20 @@ export async function runAction<T>(fn: () => Promise<T>, successMessage?: string
   }
 }
 
+/** Outcome of a bulk action: rows done + rows skipped with a short reason. */
+export type BulkResult = { done: number; skipped: { id: string; label: string; reason: string }[] };
+
+export const bulkIds = z.array(z.uuid()).min(1, "Select at least one row.").max(200, "Select at most 200 rows at a time.");
+
+/** e.g. "5 deleted, 2 skipped (has evaluations)." */
+export function bulkMessage(done: number, verb: string, skipped: BulkResult["skipped"]): string {
+  if (!skipped.length) return `${done} ${verb}.`;
+  const reasons = new Map<string, number>();
+  for (const s of skipped) reasons.set(s.reason, (reasons.get(s.reason) ?? 0) + 1);
+  const why = reasons.size === 1 ? [...reasons.keys()][0] : [...reasons].map(([r, n]) => `${n} ${r}`).join(", ");
+  return `${done} ${verb}, ${skipped.length} skipped (${why}).`;
+}
+
 /** FormData → plain object (checkbox "on" → true; empty strings kept). */
 export function formToObject(formData: FormData): Record<string, FormDataEntryValue | boolean> {
   const obj: Record<string, FormDataEntryValue | boolean> = {};
