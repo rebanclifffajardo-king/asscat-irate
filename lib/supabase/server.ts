@@ -9,8 +9,10 @@ import { applyRememberPreference, getSupabaseEnv, REMEMBER_COOKIE } from "./env"
  * Use in Server Components, Server Actions and Route Handlers.
  */
 export async function createClient(opts: { remember?: boolean } = {}) {
-  const { url, anonKey } = getSupabaseEnv();
+  // Read cookies first: this marks the route as dynamic, so a page is never
+  // statically prerendered at build time (even if env vars are missing).
   const cookieStore = await cookies();
+  const { url, anonKey } = getSupabaseEnv();
   const remember = opts.remember ?? cookieStore.get(REMEMBER_COOKIE)?.value !== "0";
 
   return createServerClient<Database>(url, anonKey, {

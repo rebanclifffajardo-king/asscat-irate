@@ -51,8 +51,7 @@ export async function GET(request: NextRequest) {
   wb.creator = "ASSCAT iRATE";
   wb.created = generated;
   for (const s of sections) {
-    const name = s.title.replace(/[\\/?*[\]:]/g, "").slice(0, 31);
-    const ws = wb.addWorksheet(name);
+    const ws = wb.addWorksheet(s.sheet);
     for (const [k, v] of header) ws.addRow([k, safeCell(v)]).getCell(1).font = { bold: true };
     ws.addRow([]);
     const title = ws.addRow([s.title]);

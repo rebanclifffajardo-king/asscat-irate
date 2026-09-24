@@ -40,3 +40,7 @@ next-env.d.ts
 supabase/.branches
 supabase/.temp
 __pycache__/
+.env*
+
+# local tooling
+.claude/

@@ -26,8 +26,9 @@ export default async function AdminDashboard({ searchParams }: PageProps<"/admin
   const scale = settings.rating_scale;
 
   // Idempotent time-based notifications (period started / closing / closed).
+  // (The client is created here: cookies() cannot be read inside after().)
+  const supabase = await createClient();
   after(async () => {
-    const supabase = await createClient();
     await supabase.rpc("generate_scheduled_notifications");
   });
 

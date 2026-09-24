@@ -14,7 +14,14 @@ select setseed(0.20260924);
 -- -----------------------------------------------------------------------------
 -- Helper: create a confirmed email/password auth user (fires profile trigger)
 -- -----------------------------------------------------------------------------
-create or replace function pg_temp.seed_user(p_email text, p_password text, p_role text,
+-- A throwaway schema (dropped at the end) is used because Supabase's seed
+-- runner prepares all statements up front: the helper is created and called
+-- only inside DO blocks, which resolve names at execution time.
+do $seed$
+begin
+  create schema if not exists seed_util;
+  execute $fn$
+create or replace function seed_util.seed_user(p_email text, p_password text, p_role text,
                                              p_first text, p_last text)
 returns uuid
 language plpgsql
@@ -36,12 +43,14 @@ begin
           'email', now(), now(), now());
   return v_id;
 end;
-$$;
+$$
+  $fn$;
+end $seed$;
 
 -- -----------------------------------------------------------------------------
 -- Administrator
 -- -----------------------------------------------------------------------------
-select pg_temp.seed_user('admin@asscat.edu.ph', 'Admin@12345', 'admin', 'System', 'Administrator');
+do $$ begin perform seed_util.seed_user('admin@asscat.edu.ph', 'Admin@12345', 'admin', 'System', 'Administrator'); end $$;
 
 -- -----------------------------------------------------------------------------
 -- Departments, programs, year levels
@@ -158,7 +167,7 @@ begin
       ('FAC-0012', 'Nestor',    'Rivera',   'Mercado',   'BSCE',  '1998-08-17', '2024-08-01')
     ) as t(num, first, middle, last, prog, bday, started)
   loop
-    v_uid := pg_temp.seed_user(
+    v_uid := seed_util.seed_user(
       lower(replace(f.first, ' ', '') || '.' || replace(f.last, ' ', '')) || '@asscat.edu.ph',
       'Faculty@12345', 'faculty', f.first, f.last);
     insert into public.faculty (profile_id, faculty_number, first_name, middle_name, last_name, email,
@@ -195,7 +204,7 @@ begin
       v_first := firsts[1 + ((v_n * 7) % array_length(firsts, 1))];
       v_last  := lasts[1 + ((v_n * 11) % array_length(lasts, 1))];
       v_num   := (2027 - v_year)::text || '-' || lpad(v_n::text, 4, '0');
-      v_uid := pg_temp.seed_user(v_num || '@student.asscat.edu.ph', 'Student@12345', 'student', v_first, v_last);
+      v_uid := seed_util.seed_user(v_num || '@student.asscat.edu.ph', 'Student@12345', 'student', v_first, v_last);
       insert into public.students (profile_id, student_number, first_name, middle_name, last_name, email,
                                    program_id, year_level_id)
       select v_uid, v_num, v_first, middles[1 + (v_n % array_length(middles, 1))], v_last,
@@ -333,3 +342,5 @@ insert into public.notifications (user_id, title, message, type, link, dedupe_ke
 select p.id, 'Welcome to ASSCAT iRATE', 'The demo environment is ready. Explore the dashboard to get started.',
        'success', '/admin/dashboard', 'welcome'
 from public.profiles p where p.role = 'admin';
+
+drop schema seed_util cascade;
